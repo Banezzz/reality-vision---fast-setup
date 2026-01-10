@@ -7,15 +7,28 @@ export LANG=en_US.UTF-8
 # 改进版：动态SNI选择 + 二维码展示 + 多语言支持
 # =========================
 
+# Bash 版本检查 (需要 4.3+ 支持 nameref 和 wait -n)
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3))); then
+    echo "Error: This script requires bash 4.3 or newer (current: ${BASH_VERSION})"
+    echo "Please upgrade bash or use a newer system"
+    exit 1
+fi
+
 ENV_FILE="/root/reality_vision.env"
 LANG_FILE="/root/reality_vision.lang"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 SERVICE="xray"
 
-# 缓存配置
-CACHE_FILE="/tmp/sni_latency_cache.txt"
+# 缓存配置（放在 /root 下更安全）
+CACHE_FILE="/root/.sni_latency_cache"
 CACHE_TTL=3600  # 1小时
+
+# 包管理器变量
+PKG_MANAGER=""
+PKG_UPDATE=""
+PKG_INSTALL=""
+PKG_CHECK=""
 
 PORT_MIN=10000
 PORT_MAX=65535
@@ -153,6 +166,45 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
+# ============== 进程清理 ==============
+
+# 清理函数，确保脚本退出时清理后台进程和临时文件
+cleanup() {
+    # 终止所有后台作业
+    jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
+    # 清理可能残留的临时目录
+    rm -rf /tmp/tmp.*/ 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# ============== 包管理器检测 ==============
+
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt"
+        PKG_UPDATE="apt-get update -y"
+        PKG_INSTALL="apt-get install -y"
+        PKG_CHECK="dpkg -s"
+    elif command -v dnf &>/dev/null; then
+        PKG_MANAGER="dnf"
+        PKG_UPDATE="dnf check-update || true"
+        PKG_INSTALL="dnf install -y"
+        PKG_CHECK="rpm -q"
+    elif command -v yum &>/dev/null; then
+        PKG_MANAGER="yum"
+        PKG_UPDATE="yum check-update || true"
+        PKG_INSTALL="yum install -y"
+        PKG_CHECK="rpm -q"
+    else
+        echo -e "${RED}[ERROR]${NC} Unsupported package manager"
+        echo "Please use Debian/Ubuntu or CentOS/RHEL/Fedora"
+        exit 1
+    fi
+}
+
+# 初始化包管理器
+detect_pkg_manager
+
 # ============== 多语言支持 ==============
 
 # 获取翻译文本
@@ -286,7 +338,9 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 is_root() { [[ "${EUID}" -eq 0 ]]; }
 
 is_port_free() {
-    ! ss -lnt | awk '{print $4}' | grep -qE "[:.]$1$"
+    local port="$1"
+    # 更精确的端口匹配：检查 :port 结尾，避免 80 匹配 8080
+    ! ss -lnt | awk '{print $4}' | grep -qE ":${port}$"
 }
 
 # 加载语言设置
@@ -335,13 +389,19 @@ select_language() {
 install_deps() {
     log_info "$(msg install_deps)"
 
-    # 需要安装的包列表
-    local required_packages=(curl unzip openssl ca-certificates iproute2 qrencode)
+    # 根据包管理器设置包名（iproute2 在 RHEL 系是 iproute）
+    local required_packages
+    if [[ "$PKG_MANAGER" == "apt" ]]; then
+        required_packages=(curl unzip openssl ca-certificates iproute2 qrencode)
+    else
+        required_packages=(curl unzip openssl ca-certificates iproute qrencode)
+    fi
+
     local missing_packages=()
 
     # 检查哪些包未安装
     for pkg in "${required_packages[@]}"; do
-        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        if ! $PKG_CHECK "$pkg" >/dev/null 2>&1; then
             missing_packages+=("$pkg")
         fi
     done
@@ -353,13 +413,20 @@ install_deps() {
     fi
 
     # 只安装缺失的包
-    apt-get update -y >/dev/null 2>&1
-    apt-get install -y "${missing_packages[@]}" >/dev/null 2>&1
+    log_info "Installing: ${missing_packages[*]}"
+    $PKG_UPDATE >/dev/null 2>&1 || true
+    if ! $PKG_INSTALL "${missing_packages[@]}" >/dev/null 2>&1; then
+        log_error "Failed to install dependencies"
+        return 1
+    fi
 }
 
 install_xray() {
     log_info "$(msg install_xray)"
-    bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1
+    if ! bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1; then
+        log_error "Failed to install Xray. Please check your network connection."
+        return 1
+    fi
 }
 
 gen_uuid() {
@@ -610,7 +677,8 @@ test_domains_parallel() {
         if [[ -f "$result_file" ]]; then
             local latency
             latency=$(cat "$result_file")
-            if [[ "$latency" -ne 9999 ]]; then
+            # 验证 latency 是有效整数
+            if [[ "$latency" =~ ^[0-9]+$ ]] && [[ "$latency" -ne 9999 ]]; then
                 _latency_map["$domain"]=$latency
                 if [[ "$latency" -lt "$best_latency" ]]; then
                     best_latency=$latency
@@ -699,7 +767,8 @@ test_domains_parallel_verbose() {
         if [[ -f "$result_file" ]]; then
             local latency
             latency=$(cat "$result_file")
-            if [[ "$latency" -eq 9999 ]]; then
+            # 验证 latency 是有效整数
+            if [[ ! "$latency" =~ ^[0-9]+$ ]] || [[ "$latency" -eq 9999 ]]; then
                 printf "[%3d/%3d] ${RED}%-50s $(msg timeout)${NC}\n" "$idx" "$total" "$domain"
             else
                 printf "[%3d/%3d] ${GREEN}%-50s %dms${NC}\n" "$idx" "$total" "$domain" "$latency"
@@ -935,8 +1004,8 @@ cmd_qr() {
 
     if ! command -v qrencode &>/dev/null; then
         log_info "$(msg install_deps)"
-        apt-get update -y >/dev/null 2>&1
-        apt-get install -y qrencode >/dev/null 2>&1
+        $PKG_UPDATE >/dev/null 2>&1 || true
+        $PKG_INSTALL qrencode >/dev/null 2>&1
     fi
 
     local link
