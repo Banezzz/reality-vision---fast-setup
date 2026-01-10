@@ -19,114 +19,125 @@ PORT_MAX=65535
 # 语言设置 (zh/en)
 CURRENT_LANG="${CURRENT_LANG:-}"
 
-# SNI 域名列表（用于延迟测试）
+# SNI 域名列表（完整列表，用于延迟测试）
 SNI_LIST=(
-    "www.tesla.com"
-    "digitalassets.tesla.com"
-    "location-services-prd.tesla.com"
-    "www.apple.com"
-    "apps.apple.com"
-    "xp.apple.com"
-    "ocsp2.apple.com"
-    "iosapps.itunes.apple.com"
-    "fpinit.itunes.apple.com"
-    "se-edge.itunes.apple.com"
-    "downloaddispatch.itunes.apple.com"
-    "amp-api-edge.apps.apple.com"
-    "gsp-ssl.ls.apple.com"
-    "configuration.ls.apple.com"
-    "apps.mzstatic.com"
-    "is1-ssl.mzstatic.com"
-    "statici.icloud.com"
-    "www.icloud.com"
-    "www.microsoft.com"
-    "azure.microsoft.com"
-    "visualstudio.microsoft.com"
-    "devblogs.microsoft.com"
-    "c.s-microsoft.com"
-    "store-images.s-microsoft.com"
-    "res.public.onecdn.static.microsoft"
-    "cdn-dynmedia-1.microsoft.com"
-    "res-1.cdn.office.net"
-    "img-prod-cms-rt-microsoft-com.akamaized.net"
-    "aadcdn.msftauth.net"
-    "acctcdn.msftauth.net"
-    "www.bing.com"
-    "r.bing.com"
-    "th.bing.com"
-    "ts2.tc.mm.bing.net"
-    "ts3.tc.mm.bing.net"
-    "ts4.tc.mm.bing.net"
-    "aws.com"
-    "aws.amazon.com"
-    "vs.aws.amazon.com"
-    "d2c.aws.amazon.com"
-    "s0.awsstatic.com"
-    "d1.awsstatic.com"
-    "t0.m.awsstatic.com"
-    "d0.m.awsstatic.com"
-    "a.b.cdn.console.awsstatic.com"
-    "prod.pa.cdn.uis.awsstatic.com"
-    "prod.us-east-1.ui.gcr-chat.marketing.aws.dev"
-    "prod.log.shortbread.aws.dev"
-    "d3agakyjgjv5i8.cloudfront.net"
-    "intel.com"
-    "www.intel.com"
     "amd.com"
-    "www.amd.com"
-    "download.amd.com"
-    "drivers.amd.com"
-    "www.nvidia.com"
-    "images.nvidia.com"
-    "www.sony.com"
-    "electronics.sony.com"
-    "www.xbox.com"
-    "assets-www.xbox.com"
-    "assets-xbxweb.xbox.com"
-    "sisu.xboxlive.com"
-    "catalog.gamepass.com"
-    "www.oracle.com"
-    "d.oracleinfinity.io"
-    "lpcdn.lpsnmedia.net"
-    "publisher.liveperson.net"
-    "tag-logger.demandbase.com"
-    "tag.demandbase.com"
-    "tags.tiqcdn.com"
-    "cdn.userway.org"
-    "cdn77.api.userway.org"
-    "s7mbrstream.scene7.com"
-    "api.company-target.com"
-    "s.company-target.com"
-    "gray-config-prod.api.arc-cdn.net"
-    "gray-config-prod.api.cdn.arcpublishing.com"
-    "gray.video-player.arcpublishing.com"
-    "gray-wowt-prod.gtv-cdn.com"
-    "beacon.gtv-pub.com"
-    "www.wowt.com"
-    "rum.hlx.page"
-    "s.go-mpulse.net"
-    "ms-python.gallerycdn.vsassets.io"
-    "ms-vscode.gallerycdn.vsassets.io"
-    "vscjava.gallerycdn.vsassets.io"
-    "i7158c100-ds-aksb-a.akamaihd.net"
-    "d.impactradius-event.com"
-    "consent.trustarc.com"
-    "munchkin.marketo.net"
-    "logx.optimizely.com"
-    "static.cloud.coveo.com"
-    "mscom.demdex.net"
+    "aws.com"
+    "c.6sc.co"
     "j.6sc.co"
     "b.6sc.co"
-    "c.6sc.co"
+    "intel.com"
+    "r.bing.com"
+    "th.bing.com"
+    "www.amd.com"
+    "www.aws.com"
     "ipv6.6sc.co"
-    "cdn.bizibly.com"
-    "cdn.bizible.com"
-    "cdnssl.clicktale.net"
-    "assets.adobedtm.com"
-    "snap.licdn.com"
+    "www.xbox.com"
+    "www.sony.com"
+    "rum.hlx.page"
+    "www.bing.com"
+    "xp.apple.com"
+    "www.wowt.com"
+    "www.apple.com"
+    "www.intel.com"
+    "www.tesla.com"
     "www.xilinx.com"
-    "ce.mf.marsflag.com"
+    "www.oracle.com"
+    "www.icloud.com"
+    "apps.apple.com"
+    "c.marsflag.com"
+    "www.nvidia.com"
+    "snap.licdn.com"
+    "aws.amazon.com"
+    "drivers.amd.com"
+    "cdn.bizibly.com"
+    "s.go-mpulse.net"
+    "tags.tiqcdn.com"
+    "cdn.bizible.com"
+    "ocsp2.apple.com"
+    "cdn.userway.org"
+    "download.amd.com"
+    "d1.awsstatic.com"
+    "s0.awsstatic.com"
+    "mscom.demdex.net"
+    "a0.awsstatic.com"
+    "go.microsoft.com"
+    "apps.mzstatic.com"
+    "sisu.xboxlive.com"
+    "www.microsoft.com"
     "s.mp.marsflag.com"
+    "images.nvidia.com"
+    "vs.aws.amazon.com"
+    "c.s-microsoft.com"
+    "statici.icloud.com"
+    "beacon.gtv-pub.com"
+    "ts4.tc.mm.bing.net"
+    "ts3.tc.mm.bing.net"
+    "d2c.aws.amazon.com"
+    "ts1.tc.mm.bing.net"
+    "ce.mf.marsflag.com"
+    "d0.m.awsstatic.com"
+    "t0.m.awsstatic.com"
+    "ts2.tc.mm.bing.net"
+    "tag.demandbase.com"
+    "assets-www.xbox.com"
+    "logx.optimizely.com"
+    "azure.microsoft.com"
+    "aadcdn.msftauth.net"
+    "d.oracleinfinity.io"
+    "assets.adobedtm.com"
+    "lpcdn.lpsnmedia.net"
+    "res-1.cdn.office.net"
+    "is1-ssl.mzstatic.com"
+    "electronics.sony.com"
+    "intelcorp.scene7.com"
+    "acctcdn.msftauth.net"
+    "cdnssl.clicktale.net"
+    "catalog.gamepass.com"
+    "consent.trustarc.com"
+    "gsp-ssl.ls.apple.com"
+    "munchkin.marketo.net"
+    "s.company-target.com"
+    "cdn77.api.userway.org"
+    "cua-chat-ui.tesla.com"
+    "assets-xbxweb.xbox.com"
+    "ds-aksb-a.akamaihd.net"
+    "static.cloud.coveo.com"
+    "api.company-target.com"
+    "devblogs.microsoft.com"
+    "s7mbrstream.scene7.com"
+    "fpinit.itunes.apple.com"
+    "digitalassets.tesla.com"
+    "d.impactradius-event.com"
+    "downloadmirror.intel.com"
+    "iosapps.itunes.apple.com"
+    "se-edge.itunes.apple.com"
+    "publisher.liveperson.net"
+    "tag-logger.demandbase.com"
+    "services.digitaleast.mobi"
+    "configuration.ls.apple.com"
+    "gray-wowt-prod.gtv-cdn.com"
+    "visualstudio.microsoft.com"
+    "prod.log.shortbread.aws.dev"
+    "amp-api-edge.apps.apple.com"
+    "store-images.s-microsoft.com"
+    "cdn-dynmedia-1.microsoft.com"
+    "github.gallerycdn.vsassets.io"
+    "prod.pa.cdn.uis.awsstatic.com"
+    "a.b.cdn.console.awsstatic.com"
+    "d3agakyjgjv5i8.cloudfront.net"
+    "vscjava.gallerycdn.vsassets.io"
+    "location-services-prd.tesla.com"
+    "ms-vscode.gallerycdn.vsassets.io"
+    "ms-python.gallerycdn.vsassets.io"
+    "gray-config-prod.api.arc-cdn.net"
+    "i7158c100-ds-aksb-a.akamaihd.net"
+    "downloaddispatch.itunes.apple.com"
+    "res.public.onecdn.static.microsoft"
+    "gray.video-player.arcpublishing.com"
+    "gray-config-prod.api.cdn.arcpublishing.com"
+    "img-prod-cms-rt-microsoft-com.akamaized.net"
+    "prod.us-east-1.ui.gcr-chat.marketing.aws.dev"
 )
 
 # 颜色定义
@@ -165,12 +176,14 @@ msg() {
             "install_deps") echo "Installing dependencies..." ;;
             "install_xray") echo "Installing Xray..." ;;
             "gen_keys") echo "Generating Reality keys..." ;;
-            "testing_sni") echo "Testing SNI domain latency..." ;;
+            "testing_sni") echo "Testing all SNI domains for latency..." ;;
             "testing") echo "Testing..." ;;
-            "test_progress") echo "Test progress" ;;
+            "test_progress") echo "Progress" ;;
             "current") echo "Current" ;;
             "sni_timeout") echo "All test domains timed out, using default SNI: www.tesla.com" ;;
             "sni_selected") echo "Selected optimal SNI" ;;
+            "sni_multiple") echo "Multiple domains have the same lowest latency" ;;
+            "sni_choose") echo "Please choose one" ;;
             "latency") echo "latency" ;;
             "install_complete") echo "Installation complete!" ;;
             "uninstalling") echo "Uninstalling..." ;;
@@ -193,6 +206,8 @@ msg() {
             "using_sni") echo "Using specified SNI" ;;
             "installed") echo "Installed" ;;
             "not_installed") echo "Not Installed" ;;
+            "total_domains") echo "Total domains" ;;
+            "best_latency") echo "Best latency" ;;
             *) echo "$key" ;;
         esac
     else
@@ -217,12 +232,14 @@ msg() {
             "install_deps") echo "安装依赖..." ;;
             "install_xray") echo "安装 Xray..." ;;
             "gen_keys") echo "生成 Reality 密钥..." ;;
-            "testing_sni") echo "测试 SNI 域名延迟..." ;;
+            "testing_sni") echo "测试所有 SNI 域名延迟..." ;;
             "testing") echo "测试中..." ;;
-            "test_progress") echo "测试进度" ;;
+            "test_progress") echo "进度" ;;
             "current") echo "当前" ;;
             "sni_timeout") echo "所有测试域名均超时，使用默认 SNI: www.tesla.com" ;;
             "sni_selected") echo "选择最优 SNI" ;;
+            "sni_multiple") echo "多个域名具有相同的最低延迟" ;;
+            "sni_choose") echo "请选择一个" ;;
             "latency") echo "延迟" ;;
             "install_complete") echo "安装完成！" ;;
             "uninstalling") echo "开始卸载..." ;;
@@ -245,6 +262,8 @@ msg() {
             "using_sni") echo "使用指定 SNI" ;;
             "installed") echo "已安装" ;;
             "not_installed") echo "未安装" ;;
+            "total_domains") echo "域名总数" ;;
+            "best_latency") echo "最低延迟" ;;
             *) echo "$key" ;;
         esac
     fi
@@ -353,42 +372,84 @@ test_domain_latency() {
     fi
 }
 
-# 动态选择最低延迟的 SNI
+# 动态选择最低延迟的 SNI（测试所有域名）
 select_best_sni() {
-    log_info "$(msg testing_sni)"
+    local total=${#SNI_LIST[@]}
+    log_info "$(msg testing_sni) ($(msg total_domains): $total)"
 
-    local best_domain=""
+    declare -A latency_map
     local best_latency=9999
     local tested=0
-    local sample_size=20
 
-    local shuffled_domains
-    shuffled_domains=$(printf '%s\n' "${SNI_LIST[@]}" | shuf | head -n "$sample_size")
-
+    echo ""
     echo -e "${CYAN}$(msg testing)${NC}"
 
-    while IFS= read -r domain; do
+    for domain in "${SNI_LIST[@]}"; do
         tested=$((tested + 1))
-        printf "\r$(msg test_progress): %d/%d - $(msg current): %s                    " "$tested" "$sample_size" "$domain"
+        local percent=$((tested * 100 / total))
+        printf "\r[%-50s] %d%% (%d/%d) - %s          " \
+            "$(printf '#%.0s' $(seq 1 $((percent / 2))))" \
+            "$percent" "$tested" "$total" "$domain"
 
         local latency
         latency=$(test_domain_latency "$domain")
 
-        if [[ "$latency" -lt "$best_latency" && "$latency" -ne 9999 ]]; then
-            best_latency="$latency"
-            best_domain="$domain"
+        if [[ "$latency" -ne 9999 ]]; then
+            latency_map["$domain"]=$latency
+            if [[ "$latency" -lt "$best_latency" ]]; then
+                best_latency=$latency
+            fi
         fi
-    done <<< "$shuffled_domains"
+    done
 
-    printf "\n"
+    printf "\n\n"
 
-    if [[ -z "$best_domain" ]]; then
+    # 检查是否有可用域名
+    if [[ ${#latency_map[@]} -eq 0 ]]; then
         log_warn "$(msg sni_timeout)"
         SNI="www.tesla.com"
-    else
-        log_info "$(msg sni_selected): ${best_domain} ($(msg latency): ${best_latency}ms)"
-        SNI="$best_domain"
+        return
     fi
+
+    # 找出所有具有最低延迟的域名
+    local best_domains=()
+    for domain in "${!latency_map[@]}"; do
+        if [[ "${latency_map[$domain]}" -eq "$best_latency" ]]; then
+            best_domains+=("$domain")
+        fi
+    done
+
+    # 如果只有一个最优域名，直接使用
+    if [[ ${#best_domains[@]} -eq 1 ]]; then
+        SNI="${best_domains[0]}"
+        log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${best_latency}ms)"
+        return
+    fi
+
+    # 如果有多个相同延迟的域名，让用户选择
+    echo -e "${YELLOW}$(msg sni_multiple) ($(msg best_latency): ${best_latency}ms)${NC}"
+    echo -e "${CYAN}$(msg sni_choose):${NC}"
+    echo ""
+
+    local i=1
+    for domain in "${best_domains[@]}"; do
+        echo -e "  ${GREEN}$i.${NC} $domain"
+        ((i++))
+    done
+
+    echo ""
+    echo -n "  $(msg menu_choice) [1-${#best_domains[@]}]: "
+    read -r choice
+
+    # 验证输入
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#best_domains[@]} ]]; then
+        SNI="${best_domains[$((choice - 1))]}"
+    else
+        # 默认选择第一个
+        SNI="${best_domains[0]}"
+    fi
+
+    log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${best_latency}ms)"
 }
 
 write_config() {
@@ -584,20 +645,46 @@ cmd_uninstall() {
 }
 
 cmd_test_sni() {
-    log_info "$(msg testing_sni)"
+    local total=${#SNI_LIST[@]}
+    log_info "$(msg testing_sni) ($(msg total_domains): $total)"
     echo ""
 
+    declare -A latency_map
+    local tested=0
+
     for domain in "${SNI_LIST[@]}"; do
+        tested=$((tested + 1))
         local latency
         latency=$(test_domain_latency "$domain")
+
         if [[ "$latency" -eq 9999 ]]; then
-            echo -e "${RED}$domain: $(msg timeout)${NC}"
+            printf "[%3d/%3d] ${RED}%-50s $(msg timeout)${NC}\n" "$tested" "$total" "$domain"
         else
-            echo -e "${GREEN}$domain: ${latency}ms${NC}"
+            printf "[%3d/%3d] ${GREEN}%-50s %dms${NC}\n" "$tested" "$total" "$domain" "$latency"
+            latency_map["$domain"]=$latency
         fi
     done
 
     echo ""
+
+    # 显示排序结果（前10名）
+    if [[ ${#latency_map[@]} -gt 0 ]]; then
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${GREEN}                     Top 10 $(msg best_latency)${NC}"
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+
+        # 排序并显示前10
+        for domain in "${!latency_map[@]}"; do
+            echo "${latency_map[$domain]} $domain"
+        done | sort -n | head -10 | while read -r lat dom; do
+            printf "  ${GREEN}%4dms${NC}  %s\n" "$lat" "$dom"
+        done
+
+        echo ""
+        echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    fi
+
     log_info "$(msg test_complete)"
 }
 
