@@ -365,7 +365,7 @@ get_node_file() {
 list_nodes() {
     local nodes=()
     if [[ -d "$NODES_DIR" ]]; then
-        for f in "$NODES_DIR"/*.env 2>/dev/null; do
+        for f in "$NODES_DIR"/*.env; do
             [[ -f "$f" ]] || continue
             local name
             name=$(basename "$f" .env)
@@ -1015,7 +1015,7 @@ write_config() {
     local inbounds="["
     local first=true
 
-    for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+    for node_file in "$NODES_DIR"/*.env; do
         [[ -f "$node_file" ]] || continue
 
         # 读取节点配置
@@ -1299,7 +1299,7 @@ cmd_status() {
     if [[ $node_count -gt 0 ]]; then
         echo ""
         echo -e "  ${BLUE}Active connections:${NC}"
-        for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+        for node_file in "$NODES_DIR"/*.env; do
             [[ -f "$node_file" ]] || continue
             local n_name n_port
             n_name=$(basename "$node_file" .env)
@@ -1419,7 +1419,7 @@ cmd_health() {
     fi
 
     # 3. 检查每个节点的端口和 SNI
-    for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+    for node_file in "$NODES_DIR"/*.env; do
         [[ -f "$node_file" ]] || continue
         local n_name n_port n_sni
         n_name=$(basename "$node_file" .env)
