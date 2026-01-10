@@ -422,6 +422,12 @@ install_deps() {
 }
 
 install_xray() {
+    # 检查 Xray 是否已安装
+    if [[ -f "$XRAY_BIN" ]] && "$XRAY_BIN" version &>/dev/null; then
+        log_info "Xray already installed, skipping..."
+        return 0
+    fi
+
     log_info "$(msg install_xray)"
     if ! bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1; then
         log_error "Failed to install Xray. Please check your network connection."
@@ -448,35 +454,39 @@ choose_port() {
 
 gen_reality_keys() {
     log_info "$(msg gen_keys)"
-    local KEYS
+    local KEYS DERIVED
     KEYS="$("$XRAY_BIN" x25519)"
 
     # 提取私钥 (支持 "Private key: xxx" 和 "PrivateKey: xxx" 格式)
     PRIVATE_KEY="$(echo "$KEYS" | awk '/[Pp]rivate/ {print $NF}')"
 
-    # 尝试从输出中提取公钥
-    PUBLIC_KEY="$(echo "$KEYS" | awk '/[Pp]ublic/ {print $NF}')"
-
-    # 如果输出中没有公钥，使用 -i 参数从私钥派生
-    if [[ -z "$PUBLIC_KEY" && -n "$PRIVATE_KEY" ]]; then
-        PUBLIC_KEY="$("$XRAY_BIN" x25519 -i "$PRIVATE_KEY" 2>/dev/null | awk '/[Pp]ublic/ {print $NF}')"
-    fi
-
-    SHORT_ID="$(openssl rand -hex 4)"
-
-    # 验证密钥是否生成成功
+    # 验证私钥
     if [[ -z "$PRIVATE_KEY" ]]; then
         log_error "Failed to extract private key"
         log_error "Xray output: $KEYS"
         return 1
     fi
 
+    # 使用 -i 参数从私钥派生公钥（最可靠的方式）
+    DERIVED="$("$XRAY_BIN" x25519 -i "$PRIVATE_KEY" 2>/dev/null)"
+    PUBLIC_KEY="$(echo "$DERIVED" | awk '/[Pp]ublic/ {print $NF}')"
+
+    # 如果派生失败，尝试从原始输出提取（兼容旧版本）
     if [[ -z "$PUBLIC_KEY" ]]; then
-        log_error "Failed to extract/derive public key"
-        log_error "Xray output: $KEYS"
-        log_error "Try running: $XRAY_BIN x25519 -i '$PRIVATE_KEY'"
+        PUBLIC_KEY="$(echo "$KEYS" | awk '/[Pp]ublic/ {print $NF}')"
+    fi
+
+    SHORT_ID="$(openssl rand -hex 4)"
+
+    # 验证公钥
+    if [[ -z "$PUBLIC_KEY" ]]; then
+        log_error "Failed to derive public key"
+        log_error "Xray x25519 output: $KEYS"
+        log_error "Xray x25519 -i output: $DERIVED"
         return 1
     fi
+
+    log_info "Keys generated successfully"
 }
 
 # 验证 IPv4 地址格式
@@ -982,6 +992,9 @@ cmd_install() {
 
     install_deps
     install_xray
+
+    # 安装时清除 SNI 缓存，强制重新测试
+    rm -f "$CACHE_FILE" 2>/dev/null
 
     if [[ -n "${reym:-}" ]]; then
         SNI="$reym"
