@@ -165,6 +165,7 @@ msg() {
             "menu_info") echo "View Node Info" ;;
             "menu_qr") echo "Show QR Code" ;;
             "menu_status") echo "Service Status" ;;
+            "menu_health") echo "Health Check" ;;
             "menu_restart") echo "Restart Service" ;;
             "menu_test_sni") echo "Test SNI Latency" ;;
             "menu_uninstall") echo "Uninstall" ;;
@@ -212,6 +213,8 @@ msg() {
             "not_installed") echo "Not Installed" ;;
             "total_domains") echo "Total domains" ;;
             "best_latency") echo "Best latency" ;;
+            "health_check") echo "Health Check" ;;
+            "connections") echo "Active Connections" ;;
             *) echo "$key" ;;
         esac
     else
@@ -221,6 +224,7 @@ msg() {
             "menu_info") echo "查看节点信息" ;;
             "menu_qr") echo "显示二维码" ;;
             "menu_status") echo "服务状态" ;;
+            "menu_health") echo "健康检查" ;;
             "menu_restart") echo "重启服务" ;;
             "menu_test_sni") echo "测试 SNI 延迟" ;;
             "menu_uninstall") echo "卸载节点" ;;
@@ -268,6 +272,8 @@ msg() {
             "not_installed") echo "未安装" ;;
             "total_domains") echo "域名总数" ;;
             "best_latency") echo "最低延迟" ;;
+            "health_check") echo "健康检查" ;;
+            "connections") echo "当前连接数" ;;
             *) echo "$key" ;;
         esac
     fi
@@ -936,8 +942,16 @@ cmd_status() {
 
     if [[ -f "$ENV_FILE" ]]; then
         echo -e "  Config: ${GREEN}$(msg installed)${NC}"
+        source "$ENV_FILE"
     else
         echo -e "  Config: ${YELLOW}$(msg not_installed)${NC}"
+    fi
+
+    # 显示连接数
+    if [[ -n "${PORT:-}" ]]; then
+        local conn_count
+        conn_count=$(ss -tn state established "( sport = :${PORT} )" 2>/dev/null | tail -n +2 | wc -l)
+        echo -e "  $(msg connections): ${GREEN}${conn_count}${NC}"
     fi
 
     echo ""
@@ -993,6 +1007,59 @@ cmd_test_sni() {
     log_info "$(msg test_complete)"
 }
 
+cmd_health() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                     $(msg health_check)${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    local all_ok=true
+
+    # 1. 检查 Xray 服务状态
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Xray service is running"
+    else
+        echo -e "  ${RED}✗${NC} Xray service is not running"
+        all_ok=false
+    fi
+
+    # 2. 检查配置文件
+    if [[ -f "$ENV_FILE" ]]; then
+        source "$ENV_FILE"
+        echo -e "  ${GREEN}✓${NC} Configuration file exists"
+    else
+        echo -e "  ${RED}✗${NC} Configuration file not found"
+        all_ok=false
+    fi
+
+    # 3. 检查端口监听
+    if [[ -n "${PORT:-}" ]] && ss -lnt | grep -q ":${PORT} "; then
+        echo -e "  ${GREEN}✓${NC} Port $PORT is listening"
+    else
+        echo -e "  ${RED}✗${NC} Port ${PORT:-unknown} is not listening"
+        all_ok=false
+    fi
+
+    # 4. 测试 SNI 连接
+    if [[ -n "${SNI:-}" ]]; then
+        if timeout 3 openssl s_client -connect "${SNI}:443" -servername "$SNI" </dev/null &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} SNI ($SNI) is reachable"
+        else
+            echo -e "  ${YELLOW}!${NC} SNI ($SNI) connection timeout"
+        fi
+    fi
+
+    echo ""
+    if $all_ok; then
+        echo -e "  ${GREEN}All checks passed! Node is healthy.${NC}"
+    else
+        echo -e "  ${RED}Some checks failed. Please review above.${NC}"
+    fi
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+}
+
 # ============== 主菜单 ==============
 
 show_menu() {
@@ -1013,11 +1080,12 @@ show_menu() {
     echo -e "${CYAN}║${NC}   ${GREEN}2.${NC} $(msg menu_info)                                          ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}3.${NC} $(msg menu_qr)                                            ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}4.${NC} $(msg menu_status)  [$status_icon]                                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}5.${NC} $(msg menu_restart)                                            ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}6.${NC} $(msg menu_test_sni)                                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}7.${NC} $(msg menu_uninstall)                                              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}5.${NC} $(msg menu_health)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}6.${NC} $(msg menu_restart)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}7.${NC} $(msg menu_test_sni)                                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}8.${NC} $(msg menu_uninstall)                                              ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${MAGENTA}8.${NC} $(msg menu_lang)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${MAGENTA}9.${NC} $(msg menu_lang)                                            ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${RED}0.${NC} $(msg menu_exit)                                                ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
@@ -1027,7 +1095,7 @@ show_menu() {
 main_menu() {
     while true; do
         show_menu
-        echo -n "   $(msg menu_choice) [0-8]: "
+        echo -n "   $(msg menu_choice) [0-9]: "
         read -r choice
         echo ""
 
@@ -1053,21 +1121,26 @@ main_menu() {
                 read -rp "$(msg menu_press_enter)"
                 ;;
             5)
-                cmd_restart
+                cmd_health
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             6)
-                cmd_test_sni
+                cmd_restart
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             7)
-                cmd_uninstall
+                cmd_test_sni
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             8)
+                cmd_uninstall
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            9)
                 select_language
                 ;;
             0)
@@ -1094,6 +1167,7 @@ show_help() {
     echo "  info        Show node information"
     echo "  qr          Show QR code"
     echo "  status      Show service status"
+    echo "  health      Run health check"
     echo "  restart     Restart service"
     echo "  uninstall   Uninstall node"
     echo "  test-sni    Test all SNI latency"
@@ -1140,6 +1214,10 @@ case "${1:-}" in
     status)
         init_language_if_needed
         cmd_status
+        ;;
+    health)
+        init_language_if_needed
+        cmd_health
         ;;
     restart)
         init_language_if_needed
