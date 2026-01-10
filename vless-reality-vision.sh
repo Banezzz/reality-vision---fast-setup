@@ -451,16 +451,30 @@ gen_reality_keys() {
     local KEYS
     KEYS="$("$XRAY_BIN" x25519)"
 
-    # 使用 $NF 获取最后一个字段（即密钥值）
-    # 支持 "Private key: xxx" 和 "PrivateKey: xxx" 两种格式
+    # 提取私钥 (支持 "Private key: xxx" 和 "PrivateKey: xxx" 格式)
     PRIVATE_KEY="$(echo "$KEYS" | awk '/[Pp]rivate/ {print $NF}')"
+
+    # 尝试从输出中提取公钥
     PUBLIC_KEY="$(echo "$KEYS" | awk '/[Pp]ublic/ {print $NF}')"
+
+    # 如果输出中没有公钥，使用 -i 参数从私钥派生
+    if [[ -z "$PUBLIC_KEY" && -n "$PRIVATE_KEY" ]]; then
+        PUBLIC_KEY="$("$XRAY_BIN" x25519 -i "$PRIVATE_KEY" 2>/dev/null | awk '/[Pp]ublic/ {print $NF}')"
+    fi
+
     SHORT_ID="$(openssl rand -hex 4)"
 
     # 验证密钥是否生成成功
-    if [[ -z "$PRIVATE_KEY" || -z "$PUBLIC_KEY" ]]; then
-        log_error "Failed to generate Reality keys"
+    if [[ -z "$PRIVATE_KEY" ]]; then
+        log_error "Failed to extract private key"
         log_error "Xray output: $KEYS"
+        return 1
+    fi
+
+    if [[ -z "$PUBLIC_KEY" ]]; then
+        log_error "Failed to extract/derive public key"
+        log_error "Xray output: $KEYS"
+        log_error "Try running: $XRAY_BIN x25519 -i '$PRIVATE_KEY'"
         return 1
     fi
 }
