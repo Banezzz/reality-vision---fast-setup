@@ -400,11 +400,11 @@ prompt_node_name() {
     local default_name
     default_name=$(generate_random_name)
 
-    echo ""
-    echo -e "${CYAN}Enter node name (press Enter for random):${NC}"
-    echo -e "${CYAN}输入节点名称（直接回车使用随机名称）:${NC}"
-    echo -n "  [$default_name]: "
-    read -r input_name
+    echo "" >/dev/tty
+    echo -e "${CYAN}Enter node name (press Enter for random):${NC}" >/dev/tty
+    echo -e "${CYAN}输入节点名称（直接回车使用随机名称）:${NC}" >/dev/tty
+    echo -n "  [$default_name]: " >/dev/tty
+    read -r input_name </dev/tty
 
     local node_name="${input_name:-$default_name}"
 
@@ -438,22 +438,22 @@ select_node() {
         return 0
     fi
 
-    echo ""
-    echo -e "${CYAN}Available nodes / 可用节点:${NC}"
-    echo ""
+    echo "" >/dev/tty
+    echo -e "${CYAN}Available nodes / 可用节点:${NC}" >/dev/tty
+    echo "" >/dev/tty
 
     local i=1
     for node in "${nodes[@]}"; do
         local node_file
         node_file=$(get_node_file "$node")
         source "$node_file"
-        echo -e "  ${GREEN}$i.${NC} $node (Port: $PORT, SNI: $SNI)"
+        echo -e "  ${GREEN}$i.${NC} $node (Port: $PORT, SNI: $SNI)" >/dev/tty
         ((i++))
     done
 
-    echo ""
-    echo -n "  Select node / 选择节点 [1-$count]: "
-    read -r choice
+    echo "" >/dev/tty
+    echo -n "  Select node / 选择节点 [1-$count]: " >/dev/tty
+    read -r choice </dev/tty
 
     if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le $count ]]; then
         CURRENT_NODE_NAME="${nodes[$((choice - 1))]}"
@@ -480,6 +480,7 @@ save_lang() {
 # 语言选择界面
 select_language() {
     clear
+    {
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}           ${YELLOW}Select Language / 选择语言${NC}                        ${CYAN}║${NC}"
@@ -491,7 +492,8 @@ select_language() {
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -n "   请选择 / Please choose [1-2]: "
-    read -r lang_choice
+    } >/dev/tty
+    read -r lang_choice </dev/tty
 
     case "$lang_choice" in
         1)
@@ -983,6 +985,7 @@ select_best_sni() {
     fi
 
     # 如果有多个相同延迟的域名，让用户选择
+    {
     echo -e "${YELLOW}$(msg sni_multiple) ($(msg best_latency): ${best_latency}ms)${NC}"
     echo -e "${CYAN}$(msg sni_choose):${NC}"
     echo ""
@@ -995,7 +998,8 @@ select_best_sni() {
 
     echo ""
     echo -n "  $(msg menu_choice) [1-${#best_domains[@]}]: "
-    read -r choice
+    } >/dev/tty
+    read -r choice </dev/tty
 
     # 验证输入
     if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#best_domains[@]} ]]; then
@@ -1328,10 +1332,12 @@ cmd_remove() {
     local node_file
     node_file=$(get_node_file "$CURRENT_NODE_NAME")
 
+    {
     echo ""
     echo -e "${YELLOW}About to remove node: $CURRENT_NODE_NAME${NC}"
     echo -n "Confirm? [y/N]: "
-    read -r confirm
+    } >/dev/tty
+    read -r confirm </dev/tty
 
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_info "Cancelled"
