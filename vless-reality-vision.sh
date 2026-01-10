@@ -14,7 +14,8 @@ if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3))); 
     exit 1
 fi
 
-ENV_FILE="/root/reality_vision.env"
+# 配置目录（支持多节点）
+NODES_DIR="/root/reality_nodes"
 LANG_FILE="/root/reality_vision.lang"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONF="/usr/local/etc/xray/config.json"
@@ -23,6 +24,9 @@ SERVICE="xray"
 # 缓存配置（放在 /root 下更安全）
 CACHE_FILE="/root/.sni_latency_cache"
 CACHE_TTL=3600  # 1小时
+
+# 当前操作的节点名称
+CURRENT_NODE_NAME=""
 
 # 包管理器变量
 PKG_MANAGER=""
@@ -341,6 +345,123 @@ is_port_free() {
     local port="$1"
     # 更精确的端口匹配：检查 :port 结尾，避免 80 匹配 8080
     ! ss -lnt | awk '{print $4}' | grep -qE ":${port}$"
+}
+
+# ============== 多节点管理 ==============
+
+# 初始化节点目录
+init_nodes_dir() {
+    mkdir -p "$NODES_DIR"
+    chmod 700 "$NODES_DIR"
+}
+
+# 获取节点配置文件路径
+get_node_file() {
+    local node_name="$1"
+    echo "${NODES_DIR}/${node_name}.env"
+}
+
+# 列出所有节点
+list_nodes() {
+    local nodes=()
+    if [[ -d "$NODES_DIR" ]]; then
+        for f in "$NODES_DIR"/*.env 2>/dev/null; do
+            [[ -f "$f" ]] || continue
+            local name
+            name=$(basename "$f" .env)
+            nodes+=("$name")
+        done
+    fi
+    echo "${nodes[@]}"
+}
+
+# 获取节点数量
+count_nodes() {
+    local count=0
+    if [[ -d "$NODES_DIR" ]]; then
+        count=$(find "$NODES_DIR" -maxdepth 1 -name "*.env" 2>/dev/null | wc -l)
+    fi
+    echo "$count"
+}
+
+# 检查节点是否存在
+node_exists() {
+    local node_name="$1"
+    [[ -f "$(get_node_file "$node_name")" ]]
+}
+
+# 生成随机节点名称
+generate_random_name() {
+    echo "node_$(openssl rand -hex 4)"
+}
+
+# 交互式输入节点名称
+prompt_node_name() {
+    local default_name
+    default_name=$(generate_random_name)
+
+    echo ""
+    echo -e "${CYAN}Enter node name (press Enter for random):${NC}"
+    echo -e "${CYAN}输入节点名称（直接回车使用随机名称）:${NC}"
+    echo -n "  [$default_name]: "
+    read -r input_name
+
+    local node_name="${input_name:-$default_name}"
+
+    # 清理非法字符，只保留字母、数字、下划线、短横线
+    node_name=$(echo "$node_name" | tr -cd 'a-zA-Z0-9_-')
+
+    # 如果名称已存在，添加后缀
+    local base_name="$node_name"
+    local counter=1
+    while node_exists "$node_name"; do
+        node_name="${base_name}_${counter}"
+        ((counter++))
+    done
+
+    echo "$node_name"
+}
+
+# 选择节点（交互式）
+select_node() {
+    local nodes
+    read -ra nodes <<< "$(list_nodes)"
+    local count=${#nodes[@]}
+
+    if [[ $count -eq 0 ]]; then
+        log_error "$(msg config_not_found)"
+        return 1
+    fi
+
+    if [[ $count -eq 1 ]]; then
+        CURRENT_NODE_NAME="${nodes[0]}"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}Available nodes / 可用节点:${NC}"
+    echo ""
+
+    local i=1
+    for node in "${nodes[@]}"; do
+        local node_file
+        node_file=$(get_node_file "$node")
+        source "$node_file"
+        echo -e "  ${GREEN}$i.${NC} $node (Port: $PORT, SNI: $SNI)"
+        ((i++))
+    done
+
+    echo ""
+    echo -n "  Select node / 选择节点 [1-$count]: "
+    read -r choice
+
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le $count ]]; then
+        CURRENT_NODE_NAME="${nodes[$((choice - 1))]}"
+    else
+        CURRENT_NODE_NAME="${nodes[0]}"
+    fi
+
+    return 0
 }
 
 # 加载语言设置
@@ -889,9 +1010,60 @@ select_best_sni() {
 
 write_config() {
     mkdir -p /usr/local/etc/xray
-    cat > "$XRAY_CONF" <<JSON
+
+    # 生成包含所有节点的 inbounds 配置
+    local inbounds="["
+    local first=true
+
+    for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+        [[ -f "$node_file" ]] || continue
+
+        # 读取节点配置
+        local n_port n_uuid n_sni n_private_key n_short_id
+        n_port=$(grep "^PORT=" "$node_file" | cut -d= -f2)
+        n_uuid=$(grep "^UUID=" "$node_file" | cut -d= -f2)
+        n_sni=$(grep "^SNI=" "$node_file" | cut -d= -f2)
+        n_private_key=$(grep "^PRIVATE_KEY=" "$node_file" | cut -d= -f2)
+        n_short_id=$(grep "^SHORT_ID=" "$node_file" | cut -d= -f2)
+
+        [[ -z "$n_port" || -z "$n_uuid" ]] && continue
+
+        if $first; then
+            first=false
+        else
+            inbounds+=","
+        fi
+
+        inbounds+=$(cat <<INBOUND
 {
-  "inbounds": [{
+    "listen": "0.0.0.0",
+    "port": $n_port,
+    "protocol": "vless",
+    "settings": {
+      "clients": [{ "id": "$n_uuid", "flow": "xtls-rprx-vision" }],
+      "decryption": "none"
+    },
+    "streamSettings": {
+      "network": "tcp",
+      "security": "reality",
+      "realitySettings": {
+        "dest": "$n_sni:443",
+        "serverNames": ["$n_sni"],
+        "privateKey": "$n_private_key",
+        "shortIds": ["$n_short_id"]
+      }
+    }
+  }
+INBOUND
+)
+    done
+
+    inbounds+="]"
+
+    # 如果没有节点，使用当前配置
+    if $first; then
+        inbounds=$(cat <<INBOUND
+[{
     "listen": "0.0.0.0",
     "port": $PORT,
     "protocol": "vless",
@@ -909,27 +1081,48 @@ write_config() {
         "shortIds": ["$SHORT_ID"]
       }
     }
-  }],
+  }]
+INBOUND
+)
+    fi
+
+    cat > "$XRAY_CONF" <<JSON
+{
+  "inbounds": $inbounds,
   "outbounds": [{ "protocol": "freedom" }]
 }
 JSON
 }
 
 save_env() {
-    cat > "$ENV_FILE" <<ENV
+    init_nodes_dir
+
+    # 使用节点名称或端口作为文件名
+    local node_name="${CURRENT_NODE_NAME:-$PORT}"
+    local node_file
+    node_file=$(get_node_file "$node_name")
+
+    cat > "$node_file" <<ENV
+NODE_NAME=$node_name
 SERVER_IP=$SERVER_IP
 PORT=$PORT
 UUID=$UUID
 SNI=$SNI
 PUBLIC_KEY=$PUBLIC_KEY
+PRIVATE_KEY=$PRIVATE_KEY
 SHORT_ID=$SHORT_ID
 ENV
-    chmod 600 "$ENV_FILE"
+    chmod 600 "$node_file"
+
+    CURRENT_NODE_NAME="$node_name"
 }
 
 get_share_link() {
-    source "$ENV_FILE"
-    echo "vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#RV-Reality-Vision"
+    local node_file
+    node_file=$(get_node_file "$CURRENT_NODE_NAME")
+    source "$node_file"
+    local node_label="${NODE_NAME:-RV-Reality}"
+    echo "vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#${node_label}"
 }
 
 show_qrcode() {
@@ -951,7 +1144,9 @@ show_qrcode() {
 }
 
 show_info() {
-    source "$ENV_FILE"
+    local node_file
+    node_file=$(get_node_file "$CURRENT_NODE_NAME")
+    source "$node_file"
     local link
     link=$(get_share_link)
 
@@ -960,6 +1155,7 @@ show_info() {
     echo -e "${GREEN}                     $(msg node_info)${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
+    echo -e "  ${BLUE}Node Name:${NC}  ${NODE_NAME:-$CURRENT_NODE_NAME}"
     echo -e "  ${BLUE}$(msg server_addr):${NC} $SERVER_IP"
     echo -e "  ${BLUE}$(msg port):${NC}       $PORT"
     echo -e "  ${BLUE}UUID:${NC}       $UUID"
@@ -986,6 +1182,21 @@ cmd_install() {
     install_deps
     install_xray
 
+    # 交互式输入节点名称（或使用环境变量 name=xxx）
+    if [[ -n "${name:-}" ]]; then
+        CURRENT_NODE_NAME="$name"
+        # 如果名称已存在，添加后缀
+        local base_name="$CURRENT_NODE_NAME"
+        local counter=1
+        while node_exists "$CURRENT_NODE_NAME"; do
+            CURRENT_NODE_NAME="${base_name}_${counter}"
+            ((counter++))
+        done
+    else
+        CURRENT_NODE_NAME=$(prompt_node_name)
+    fi
+    log_info "Node name: $CURRENT_NODE_NAME"
+
     # 安装时清除 SNI 缓存，强制重新测试
     rm -f "$CACHE_FILE" 2>/dev/null
 
@@ -1002,12 +1213,11 @@ cmd_install() {
 
     SERVER_IP="$(get_server_ip_parallel)"
 
+    save_env
     write_config
 
     systemctl enable xray >/dev/null 2>&1
     systemctl restart xray
-
-    save_env
 
     log_info "$(msg install_complete)"
 
@@ -1019,18 +1229,12 @@ cmd_install() {
 }
 
 cmd_info() {
-    if [[ ! -f "$ENV_FILE" ]]; then
-        log_error "$(msg config_not_found)"
-        return 1
-    fi
+    select_node || return 1
     show_info
 }
 
 cmd_qr() {
-    if [[ ! -f "$ENV_FILE" ]]; then
-        log_error "$(msg config_not_found)"
-        return 1
-    fi
+    select_node || return 1
 
     if ! command -v qrencode &>/dev/null; then
         log_info "$(msg install_deps)"
@@ -1041,6 +1245,37 @@ cmd_qr() {
     local link
     link=$(get_share_link)
     show_qrcode "$link"
+}
+
+# 列出所有节点
+cmd_list() {
+    local nodes
+    read -ra nodes <<< "$(list_nodes)"
+
+    if [[ ${#nodes[@]} -eq 0 ]]; then
+        log_error "$(msg config_not_found)"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                     All Nodes / 所有节点${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    local i=1
+    for node in "${nodes[@]}"; do
+        local node_file
+        node_file=$(get_node_file "$node")
+        source "$node_file"
+        echo -e "  ${GREEN}$i.${NC} ${BLUE}$node${NC}"
+        echo -e "     Port: $PORT | SNI: $SNI"
+        echo -e "     UUID: ${UUID:0:8}..."
+        echo ""
+        ((i++))
+    done
+
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 }
 
 cmd_status() {
@@ -1056,18 +1291,23 @@ cmd_status() {
         echo -e "  Xray: ${RED}○ Stopped${NC}"
     fi
 
-    if [[ -f "$ENV_FILE" ]]; then
-        echo -e "  Config: ${GREEN}$(msg installed)${NC}"
-        source "$ENV_FILE"
-    else
-        echo -e "  Config: ${YELLOW}$(msg not_installed)${NC}"
-    fi
+    local node_count
+    node_count=$(count_nodes)
+    echo -e "  Nodes: ${GREEN}${node_count}${NC}"
 
-    # 显示连接数
-    if [[ -n "${PORT:-}" ]]; then
-        local conn_count
-        conn_count=$(ss -tn state established "( sport = :${PORT} )" 2>/dev/null | tail -n +2 | wc -l)
-        echo -e "  $(msg connections): ${GREEN}${conn_count}${NC}"
+    # 显示每个节点的连接数
+    if [[ $node_count -gt 0 ]]; then
+        echo ""
+        echo -e "  ${BLUE}Active connections:${NC}"
+        for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+            [[ -f "$node_file" ]] || continue
+            local n_name n_port
+            n_name=$(basename "$node_file" .env)
+            n_port=$(grep "^PORT=" "$node_file" | cut -d= -f2)
+            local conn_count
+            conn_count=$(ss -tn state established "( sport = :${n_port} )" 2>/dev/null | tail -n +2 | wc -l)
+            echo -e "    $n_name (Port $n_port): ${GREEN}${conn_count}${NC}"
+        done
     fi
 
     echo ""
@@ -1081,11 +1321,39 @@ cmd_restart() {
     log_info "$(msg service_restarted)"
 }
 
+# 删除单个节点
+cmd_remove() {
+    select_node || return 1
+
+    local node_file
+    node_file=$(get_node_file "$CURRENT_NODE_NAME")
+
+    echo ""
+    echo -e "${YELLOW}About to remove node: $CURRENT_NODE_NAME${NC}"
+    echo -n "Confirm? [y/N]: "
+    read -r confirm
+
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Cancelled"
+        return 0
+    fi
+
+    rm -f "$node_file"
+    log_info "Node '$CURRENT_NODE_NAME' removed"
+
+    # 重新生成 xray 配置
+    write_config
+    systemctl restart xray 2>/dev/null || true
+
+    log_info "Xray config updated"
+}
+
 cmd_uninstall() {
     log_info "$(msg uninstalling)"
     systemctl stop xray 2>/dev/null || true
     systemctl disable xray 2>/dev/null || true
-    rm -f "$XRAY_CONF" "$ENV_FILE" "$LANG_FILE"
+    rm -f "$XRAY_CONF" "$LANG_FILE"
+    rm -rf "$NODES_DIR"
     curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- remove >/dev/null 2>&1
     log_info "$(msg uninstall_complete)"
 }
@@ -1140,35 +1408,46 @@ cmd_health() {
         all_ok=false
     fi
 
-    # 2. 检查配置文件
-    if [[ -f "$ENV_FILE" ]]; then
-        source "$ENV_FILE"
-        echo -e "  ${GREEN}✓${NC} Configuration file exists"
+    # 2. 检查节点数量
+    local node_count
+    node_count=$(count_nodes)
+    if [[ $node_count -gt 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} $node_count node(s) configured"
     else
-        echo -e "  ${RED}✗${NC} Configuration file not found"
+        echo -e "  ${RED}✗${NC} No nodes configured"
         all_ok=false
     fi
 
-    # 3. 检查端口监听
-    if [[ -n "${PORT:-}" ]] && ss -lnt | grep -q ":${PORT} "; then
-        echo -e "  ${GREEN}✓${NC} Port $PORT is listening"
-    else
-        echo -e "  ${RED}✗${NC} Port ${PORT:-unknown} is not listening"
-        all_ok=false
-    fi
+    # 3. 检查每个节点的端口和 SNI
+    for node_file in "$NODES_DIR"/*.env 2>/dev/null; do
+        [[ -f "$node_file" ]] || continue
+        local n_name n_port n_sni
+        n_name=$(basename "$node_file" .env)
+        n_port=$(grep "^PORT=" "$node_file" | cut -d= -f2)
+        n_sni=$(grep "^SNI=" "$node_file" | cut -d= -f2)
 
-    # 4. 测试 SNI 连接
-    if [[ -n "${SNI:-}" ]]; then
-        if timeout 3 openssl s_client -connect "${SNI}:443" -servername "$SNI" </dev/null &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} SNI ($SNI) is reachable"
+        echo ""
+        echo -e "  ${BLUE}Node: $n_name${NC}"
+
+        # 检查端口监听
+        if ss -lnt | grep -qE ":${n_port}\s"; then
+            echo -e "    ${GREEN}✓${NC} Port $n_port is listening"
         else
-            echo -e "  ${YELLOW}!${NC} SNI ($SNI) connection timeout"
+            echo -e "    ${RED}✗${NC} Port $n_port is not listening"
+            all_ok=false
         fi
-    fi
+
+        # 测试 SNI 连接
+        if timeout 3 openssl s_client -connect "${n_sni}:443" -servername "$n_sni" </dev/null &>/dev/null; then
+            echo -e "    ${GREEN}✓${NC} SNI ($n_sni) is reachable"
+        else
+            echo -e "    ${YELLOW}!${NC} SNI ($n_sni) connection timeout"
+        fi
+    done
 
     echo ""
     if $all_ok; then
-        echo -e "  ${GREEN}All checks passed! Node is healthy.${NC}"
+        echo -e "  ${GREEN}All checks passed! Nodes are healthy.${NC}"
     else
         echo -e "  ${RED}Some checks failed. Please review above.${NC}"
     fi
@@ -1180,28 +1459,30 @@ cmd_health() {
 
 show_menu() {
     clear
-    local status_icon
+    local status_icon node_count
     if systemctl is-active --quiet xray 2>/dev/null; then
         status_icon="${GREEN}●${NC}"
     else
         status_icon="${RED}○${NC}"
     fi
+    node_count=$(count_nodes)
 
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}         ${YELLOW}$(msg menu_title)${NC}              ${CYAN}║${NC}"
     echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}1.${NC} $(msg menu_install)                                              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}1.${NC} $(msg menu_install) (Add Node)                                  ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}2.${NC} $(msg menu_info)                                          ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}3.${NC} $(msg menu_qr)                                            ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}4.${NC} $(msg menu_status)  [$status_icon]                                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}5.${NC} $(msg menu_health)                                            ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}6.${NC} $(msg menu_restart)                                            ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}7.${NC} $(msg menu_test_sni)                                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${GREEN}8.${NC} $(msg menu_uninstall)                                              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}4.${NC} $(msg menu_status)  [$status_icon] (${node_count} nodes)                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}5.${NC} List Nodes / 列出节点                                     ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}6.${NC} Remove Node / 删除节点                                    ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}7.${NC} $(msg menu_restart)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}8.${NC} $(msg menu_test_sni)                                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}9.${NC} $(msg menu_uninstall) (All)                                     ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   ${MAGENTA}9.${NC} $(msg menu_lang)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${MAGENTA}L.${NC} $(msg menu_lang)                                            ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${RED}0.${NC} $(msg menu_exit)                                                ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
@@ -1211,7 +1492,7 @@ show_menu() {
 main_menu() {
     while true; do
         show_menu
-        echo -n "   $(msg menu_choice) [0-9]: "
+        echo -n "   $(msg menu_choice) [0-9,L]: "
         read -r choice
         echo ""
 
@@ -1237,26 +1518,31 @@ main_menu() {
                 read -rp "$(msg menu_press_enter)"
                 ;;
             5)
-                cmd_health
+                cmd_list
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             6)
-                cmd_restart
+                cmd_remove
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             7)
-                cmd_test_sni
+                cmd_restart
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             8)
-                cmd_uninstall
+                cmd_test_sni
                 echo ""
                 read -rp "$(msg menu_press_enter)"
                 ;;
             9)
+                cmd_uninstall
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            [Ll])
                 select_language
                 ;;
             0)
@@ -1273,32 +1559,35 @@ main_menu() {
 
 show_help() {
     echo ""
-    echo -e "${CYAN}VLESS TCP REALITY Vision${NC}"
+    echo -e "${CYAN}VLESS TCP REALITY Vision (Multi-Node Support)${NC}"
     echo ""
     echo "Usage: bash $0 [command]"
     echo ""
     echo "Commands:"
     echo "  (none)      Show interactive menu"
-    echo "  install     Install and configure node"
+    echo "  install     Add a new node"
+    echo "  list        List all nodes"
     echo "  info        Show node information"
     echo "  qr          Show QR code"
     echo "  status      Show service status"
-    echo "  health      Run health check"
+    echo "  remove      Remove a node"
     echo "  restart     Restart service"
-    echo "  uninstall   Uninstall node"
+    echo "  uninstall   Uninstall all nodes and Xray"
     echo "  test-sni    Test all SNI latency"
     echo "  menu        Show interactive menu"
     echo "  help        Show this help"
     echo ""
     echo "Optional parameters (for install):"
+    echo "  name=xxx    Specify node name"
     echo "  reym=xxx    Specify SNI domain"
     echo "  vlpt=xxx    Specify port"
     echo "  uuid=xxx    Specify UUID"
     echo ""
     echo "Examples:"
-    echo "  bash $0                              # Interactive menu"
-    echo "  bash $0 install                      # Auto-select best SNI"
-    echo "  reym=www.tesla.com bash $0 install   # Specify SNI"
+    echo "  bash $0                                    # Interactive menu"
+    echo "  bash $0 install                            # Add node (interactive)"
+    echo "  name=hk1 bash $0 install                   # Add node with name"
+    echo "  name=jp1 reym=www.tesla.com bash $0 install  # Custom name + SNI"
     echo ""
 }
 
@@ -1319,6 +1608,10 @@ case "${1:-}" in
         init_language_if_needed
         cmd_install
         ;;
+    list)
+        init_language_if_needed
+        cmd_list
+        ;;
     info)
         init_language_if_needed
         cmd_info
@@ -1331,9 +1624,9 @@ case "${1:-}" in
         init_language_if_needed
         cmd_status
         ;;
-    health)
+    remove)
         init_language_if_needed
-        cmd_health
+        cmd_remove
         ;;
     restart)
         init_language_if_needed
