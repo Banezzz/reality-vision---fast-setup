@@ -469,20 +469,30 @@ gen_reality_keys() {
 
     # 使用 -i 参数从私钥派生公钥（最可靠的方式）
     DERIVED="$("$XRAY_BIN" x25519 -i "$PRIVATE_KEY" 2>/dev/null)"
+
+    # 尝试多种字段名提取公钥
+    # 1. 优先从 -i 输出提取 "Public key" 或 "PublicKey"
     PUBLIC_KEY="$(echo "$DERIVED" | awk '/[Pp]ublic/ {print $NF}')"
 
-    # 如果派生失败，尝试从原始输出提取（兼容旧版本）
+    # 2. 如果没有，尝试从原始输出提取
     if [[ -z "$PUBLIC_KEY" ]]; then
         PUBLIC_KEY="$(echo "$KEYS" | awk '/[Pp]ublic/ {print $NF}')"
     fi
 
+    # 3. 某些版本可能输出第二行就是公钥（无标签）
+    if [[ -z "$PUBLIC_KEY" ]]; then
+        # xray x25519 -i 的输出应该只有公钥一行
+        PUBLIC_KEY="$(echo "$DERIVED" | head -1 | awk '{print $NF}')"
+    fi
+
     SHORT_ID="$(openssl rand -hex 4)"
 
-    # 验证公钥
-    if [[ -z "$PUBLIC_KEY" ]]; then
+    # 验证公钥格式（base64，长度约43-44字符）
+    if [[ -z "$PUBLIC_KEY" || ${#PUBLIC_KEY} -lt 40 ]]; then
         log_error "Failed to derive public key"
         log_error "Xray x25519 output: $KEYS"
         log_error "Xray x25519 -i output: $DERIVED"
+        log_error "Please run manually: $XRAY_BIN x25519 -i '$PRIVATE_KEY'"
         return 1
     fi
 
