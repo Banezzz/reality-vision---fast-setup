@@ -13,6 +13,10 @@ XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 SERVICE="xray"
 
+# 缓存配置
+CACHE_FILE="/tmp/sni_latency_cache.txt"
+CACHE_TTL=3600  # 1小时
+
 PORT_MIN=10000
 PORT_MAX=65535
 
@@ -324,8 +328,27 @@ select_language() {
 
 install_deps() {
     log_info "$(msg install_deps)"
+
+    # 需要安装的包列表
+    local required_packages=(curl unzip openssl ca-certificates iproute2 qrencode)
+    local missing_packages=()
+
+    # 检查哪些包未安装
+    for pkg in "${required_packages[@]}"; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            missing_packages+=("$pkg")
+        fi
+    done
+
+    # 如果所有包都已安装，跳过
+    if [[ ${#missing_packages[@]} -eq 0 ]]; then
+        log_info "All dependencies already installed, skipping..."
+        return
+    fi
+
+    # 只安装缺失的包
     apt-get update -y >/dev/null 2>&1
-    apt-get install -y curl unzip openssl ca-certificates iproute2 qrencode >/dev/null 2>&1
+    apt-get install -y "${missing_packages[@]}" >/dev/null 2>&1
 }
 
 install_xray() {
@@ -359,6 +382,129 @@ gen_reality_keys() {
     SHORT_ID="$(openssl rand -hex 4)"
 }
 
+# 验证 IPv4 地址格式
+is_valid_ipv4() {
+    local ip="$1"
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    local IFS='.'
+    read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        [[ "$octet" -le 255 ]] || return 1
+    done
+    return 0
+}
+
+# 并行获取服务器 IP 地址
+get_server_ip_parallel() {
+    local result_file pids=()
+    result_file=$(mktemp)
+
+    # IP 检测 API 列表
+    local apis=(
+        "https://api.ipify.org"
+        "https://ifconfig.me"
+        "https://icanhazip.com"
+        "https://ipinfo.io/ip"
+    )
+
+    # 并行请求所有 API
+    for api in "${apis[@]}"; do
+        (
+            ip=$(curl -s --max-time 5 "$api" 2>/dev/null | tr -d '[:space:]')
+            if is_valid_ipv4 "$ip"; then
+                echo "$ip" >> "$result_file"
+            fi
+        ) &
+        pids+=($!)
+    done
+
+    # 等待第一个有效结果（最多 5 秒）
+    local i=0
+    while [[ $i -lt 50 ]]; do
+        if [[ -s "$result_file" ]]; then
+            local ip
+            ip=$(head -n1 "$result_file")
+            # 终止所有后台进程
+            for pid in "${pids[@]}"; do
+                kill "$pid" 2>/dev/null || true
+            done
+            wait 2>/dev/null || true
+            rm -f "$result_file"
+            echo "$ip"
+            return 0
+        fi
+        sleep 0.1
+        ((i++))
+    done
+
+    # 超时后清理
+    for pid in "${pids[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+
+    # 检查是否有结果
+    if [[ -s "$result_file" ]]; then
+        local ip
+        ip=$(head -n1 "$result_file")
+        rm -f "$result_file"
+        echo "$ip"
+        return 0
+    fi
+
+    rm -f "$result_file"
+    echo "YOUR_SERVER_IP"
+}
+
+# 保存延迟缓存
+save_latency_cache() {
+    local -n cache_map=$1
+    {
+        echo "# timestamp: $(date +%s)"
+        for domain in "${!cache_map[@]}"; do
+            echo "$domain ${cache_map[$domain]}"
+        done
+    } > "$CACHE_FILE"
+}
+
+# 加载延迟缓存
+# 返回 0 表示加载成功且缓存有效，返回 1 表示缓存无效或不存在
+load_latency_cache() {
+    local -n cache_map=$1
+
+    # 检查缓存文件是否存在
+    if [[ ! -f "$CACHE_FILE" ]]; then
+        return 1
+    fi
+
+    # 读取时间戳并检查是否过期
+    local timestamp
+    timestamp=$(grep "^# timestamp:" "$CACHE_FILE" 2>/dev/null | awk '{print $3}')
+    if [[ -z "$timestamp" ]]; then
+        return 1
+    fi
+
+    local current_time
+    current_time=$(date +%s)
+    if (( current_time - timestamp > CACHE_TTL )); then
+        return 1
+    fi
+
+    # 加载缓存数据
+    while IFS=' ' read -r domain latency; do
+        # 跳过注释行和空行
+        [[ "$domain" =~ ^#.*$ || -z "$domain" ]] && continue
+        cache_map["$domain"]=$latency
+    done < "$CACHE_FILE"
+
+    # 检查是否成功加载了数据
+    if [[ ${#cache_map[@]} -eq 0 ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 # 测试单个域名延迟
 test_domain_latency() {
     local domain="$1"
@@ -372,37 +518,207 @@ test_domain_latency() {
     fi
 }
 
-# 动态选择最低延迟的 SNI（测试所有域名）
-select_best_sni() {
-    local total=${#SNI_LIST[@]}
-    log_info "$(msg testing_sni) ($(msg total_domains): $total)"
+# 测试单个域名并将结果写入文件（用于并行执行）
+test_domain_to_file() {
+    local domain="$1"
+    local result_dir="$2"
+    local latency
+    latency=$(test_domain_latency "$domain")
+    echo "$latency" > "${result_dir}/${domain}"
+}
 
-    declare -A latency_map
-    local best_latency=9999
-    local tested=0
+# 并行测试所有域名
+# 参数1: 关联数组名称（用于存储结果）
+# 设置全局变量 BEST_LATENCY 为最低延迟值
+test_domains_parallel() {
+    local -n _latency_map=$1
+    local total=${#SNI_LIST[@]}
+    local max_jobs=30
+    local result_dir
+    result_dir=$(mktemp -d)
+
+    # 创建标记文件表示测试进行中
+    local progress_flag="${result_dir}/.in_progress"
+    touch "$progress_flag"
+
+    # 清空结果数组
+    _latency_map=()
 
     echo ""
     echo -e "${CYAN}$(msg testing)${NC}"
 
+    # 启动进度显示后台进程
+    (
+        while [[ -f "$progress_flag" ]]; do
+            local completed
+            completed=$(find "$result_dir" -maxdepth 1 -type f ! -name '.in_progress' 2>/dev/null | wc -l)
+            local percent=$((completed * 100 / total))
+            printf "\r[%-50s] %d%% (%d/%d)          " \
+                "$(printf '#%.0s' $(seq 1 $((percent / 2))))" \
+                "$percent" "$completed" "$total"
+            sleep 0.5
+        done
+    ) &
+    local progress_pid=$!
+
+    # 并行执行测试
+    local running=0
     for domain in "${SNI_LIST[@]}"; do
-        tested=$((tested + 1))
-        local percent=$((tested * 100 / total))
-        printf "\r[%-50s] %d%% (%d/%d) - %s          " \
-            "$(printf '#%.0s' $(seq 1 $((percent / 2))))" \
-            "$percent" "$tested" "$total" "$domain"
+        # 控制并发数
+        while [[ $running -ge $max_jobs ]]; do
+            wait -n 2>/dev/null || true
+            running=$((running - 1))
+        done
 
-        local latency
-        latency=$(test_domain_latency "$domain")
+        # 启动后台任务
+        test_domain_to_file "$domain" "$result_dir" &
+        running=$((running + 1))
+    done
 
-        if [[ "$latency" -ne 9999 ]]; then
-            latency_map["$domain"]=$latency
-            if [[ "$latency" -lt "$best_latency" ]]; then
-                best_latency=$latency
+    # 等待所有后台任务完成
+    wait
+
+    # 停止进度显示
+    rm -f "$progress_flag"
+    kill $progress_pid 2>/dev/null || true
+    wait $progress_pid 2>/dev/null || true
+
+    # 显示最终进度
+    printf "\r[%-50s] %d%% (%d/%d)          \n" \
+        "$(printf '#%.0s' $(seq 1 50))" \
+        "100" "$total" "$total"
+
+    # 读取结果到关联数组
+    local best_latency=9999
+    for domain in "${SNI_LIST[@]}"; do
+        local result_file="${result_dir}/${domain}"
+        if [[ -f "$result_file" ]]; then
+            local latency
+            latency=$(cat "$result_file")
+            if [[ "$latency" -ne 9999 ]]; then
+                _latency_map["$domain"]=$latency
+                if [[ "$latency" -lt "$best_latency" ]]; then
+                    best_latency=$latency
+                fi
             fi
         fi
     done
 
-    printf "\n\n"
+    # 清理临时目录
+    rm -rf "$result_dir"
+
+    echo ""
+
+    # 返回最佳延迟值（通过全局变量）
+    BEST_LATENCY=$best_latency
+}
+
+# 并行测试所有域名（带详细输出，用于 cmd_test_sni）
+# 参数1: 关联数组名称（用于存储结果）
+test_domains_parallel_verbose() {
+    local -n _latency_map_v=$1
+    local total=${#SNI_LIST[@]}
+    local max_jobs=30
+    local result_dir
+    result_dir=$(mktemp -d)
+
+    # 创建标记文件表示测试进行中
+    local progress_flag="${result_dir}/.in_progress"
+    touch "$progress_flag"
+
+    # 清空结果数组
+    _latency_map_v=()
+
+    # 启动进度显示后台进程
+    (
+        while [[ -f "$progress_flag" ]]; do
+            local completed
+            completed=$(find "$result_dir" -maxdepth 1 -type f ! -name '.in_progress' 2>/dev/null | wc -l)
+            local percent=$((completed * 100 / total))
+            printf "\r${CYAN}$(msg testing)${NC} [%-50s] %d%% (%d/%d)          " \
+                "$(printf '#%.0s' $(seq 1 $((percent / 2))))" \
+                "$percent" "$completed" "$total"
+            sleep 0.5
+        done
+    ) &
+    local progress_pid=$!
+
+    # 并行执行测试
+    local running=0
+    for domain in "${SNI_LIST[@]}"; do
+        # 控制并发数
+        while [[ $running -ge $max_jobs ]]; do
+            wait -n 2>/dev/null || true
+            running=$((running - 1))
+        done
+
+        # 启动后台任务
+        test_domain_to_file "$domain" "$result_dir" &
+        running=$((running + 1))
+    done
+
+    # 等待所有后台任务完成
+    wait
+
+    # 停止进度显示
+    rm -f "$progress_flag"
+    kill $progress_pid 2>/dev/null || true
+    wait $progress_pid 2>/dev/null || true
+
+    # 清除进度行
+    printf "\r%-80s\r" " "
+
+    # 读取结果并显示详细信息
+    local idx=0
+    for domain in "${SNI_LIST[@]}"; do
+        idx=$((idx + 1))
+        local result_file="${result_dir}/${domain}"
+        if [[ -f "$result_file" ]]; then
+            local latency
+            latency=$(cat "$result_file")
+            if [[ "$latency" -eq 9999 ]]; then
+                printf "[%3d/%3d] ${RED}%-50s $(msg timeout)${NC}\n" "$idx" "$total" "$domain"
+            else
+                printf "[%3d/%3d] ${GREEN}%-50s %dms${NC}\n" "$idx" "$total" "$domain" "$latency"
+                _latency_map_v["$domain"]=$latency
+            fi
+        fi
+    done
+
+    # 清理临时目录
+    rm -rf "$result_dir"
+}
+
+# 动态选择最低延迟的 SNI（测试所有域名）
+select_best_sni() {
+    local total=${#SNI_LIST[@]}
+    declare -A latency_map
+    local best_latency=9999
+    local cache_loaded=0
+
+    # 尝试加载缓存
+    if load_latency_cache latency_map; then
+        cache_loaded=1
+        log_info "Using cached SNI latency results (valid for $((CACHE_TTL / 60)) minutes)"
+        # 从缓存计算最低延迟
+        for domain in "${!latency_map[@]}"; do
+            if [[ "${latency_map[$domain]}" -lt "$best_latency" ]]; then
+                best_latency="${latency_map[$domain]}"
+            fi
+        done
+    else
+        # 缓存无效，执行并行测试
+        log_info "$(msg testing_sni) ($(msg total_domains): $total)"
+
+        # 使用并行测试
+        test_domains_parallel latency_map
+        best_latency=$BEST_LATENCY
+
+        # 保存测试结果到缓存
+        if [[ ${#latency_map[@]} -gt 0 ]]; then
+            save_latency_cache latency_map
+        fi
+    fi
 
     # 检查是否有可用域名
     if [[ ${#latency_map[@]} -eq 0 ]]; then
@@ -562,7 +878,7 @@ cmd_install() {
     choose_port
     gen_reality_keys
 
-    SERVER_IP="$(curl -s --max-time 10 https://api.ipify.org || curl -s --max-time 10 https://ifconfig.me || echo "YOUR_SERVER_IP")"
+    SERVER_IP="$(get_server_ip_parallel)"
 
     write_config
 
@@ -650,20 +966,9 @@ cmd_test_sni() {
     echo ""
 
     declare -A latency_map
-    local tested=0
 
-    for domain in "${SNI_LIST[@]}"; do
-        tested=$((tested + 1))
-        local latency
-        latency=$(test_domain_latency "$domain")
-
-        if [[ "$latency" -eq 9999 ]]; then
-            printf "[%3d/%3d] ${RED}%-50s $(msg timeout)${NC}\n" "$tested" "$total" "$domain"
-        else
-            printf "[%3d/%3d] ${GREEN}%-50s %dms${NC}\n" "$tested" "$total" "$domain" "$latency"
-            latency_map["$domain"]=$latency
-        fi
-    done
+    # 使用并行测试（带详细输出）
+    test_domains_parallel_verbose latency_map
 
     echo ""
 
