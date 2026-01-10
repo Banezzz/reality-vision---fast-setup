@@ -581,11 +581,20 @@ test_domains_parallel() {
         running=$((running + 1))
     done
 
-    # 等待所有后台任务完成
-    wait
+    # 等待所有测试任务完成（不等待进度显示进程）
+    # 通过检查结果文件数量来判断是否完成
+    while true; do
+        local completed
+        completed=$(find "$result_dir" -maxdepth 1 -type f ! -name '.in_progress' 2>/dev/null | wc -l)
+        if [[ "$completed" -ge "$total" ]]; then
+            break
+        fi
+        sleep 0.2
+    done
 
-    # 停止进度显示
+    # 停止进度显示（先删除 flag 让进程退出）
     rm -f "$progress_flag"
+    sleep 0.3
     kill $progress_pid 2>/dev/null || true
     wait $progress_pid 2>/dev/null || true
 
@@ -663,11 +672,19 @@ test_domains_parallel_verbose() {
         running=$((running + 1))
     done
 
-    # 等待所有后台任务完成
-    wait
+    # 等待所有测试任务完成（不等待进度显示进程）
+    while true; do
+        local completed
+        completed=$(find "$result_dir" -maxdepth 1 -type f ! -name '.in_progress' 2>/dev/null | wc -l)
+        if [[ "$completed" -ge "$total" ]]; then
+            break
+        fi
+        sleep 0.2
+    done
 
-    # 停止进度显示
+    # 停止进度显示（先删除 flag 让进程退出）
     rm -f "$progress_flag"
+    sleep 0.3
     kill $progress_pid 2>/dev/null || true
     wait $progress_pid 2>/dev/null || true
 
