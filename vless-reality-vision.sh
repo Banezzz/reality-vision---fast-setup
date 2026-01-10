@@ -4,16 +4,20 @@ export LANG=en_US.UTF-8
 
 # =========================
 # VLESS TCP REALITY Vision 自动化脚本
-# 改进版：动态SNI选择 + 二维码展示
+# 改进版：动态SNI选择 + 二维码展示 + 多语言支持
 # =========================
 
 ENV_FILE="/root/reality_vision.env"
+LANG_FILE="/root/reality_vision.lang"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 SERVICE="xray"
 
 PORT_MIN=10000
 PORT_MAX=65535
+
+# 语言设置 (zh/en)
+CURRENT_LANG="${CURRENT_LANG:-}"
 
 # SNI 域名列表（用于延迟测试）
 SNI_LIST=(
@@ -131,7 +135,120 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
+
+# ============== 多语言支持 ==============
+
+# 获取翻译文本
+msg() {
+    local key="$1"
+    if [[ "$CURRENT_LANG" == "en" ]]; then
+        case "$key" in
+            "menu_title") echo "VLESS TCP REALITY Vision Management" ;;
+            "menu_install") echo "Install Node" ;;
+            "menu_info") echo "View Node Info" ;;
+            "menu_qr") echo "Show QR Code" ;;
+            "menu_status") echo "Service Status" ;;
+            "menu_restart") echo "Restart Service" ;;
+            "menu_test_sni") echo "Test SNI Latency" ;;
+            "menu_uninstall") echo "Uninstall" ;;
+            "menu_lang") echo "Switch Language" ;;
+            "menu_exit") echo "Exit" ;;
+            "menu_choice") echo "Please enter your choice" ;;
+            "menu_invalid") echo "Invalid option, please try again" ;;
+            "menu_press_enter") echo "Press Enter to continue..." ;;
+            "lang_select") echo "Select Language / 选择语言" ;;
+            "lang_zh") echo "Chinese (中文)" ;;
+            "lang_en") echo "English" ;;
+            "installing") echo "Installing VLESS TCP REALITY Vision..." ;;
+            "install_deps") echo "Installing dependencies..." ;;
+            "install_xray") echo "Installing Xray..." ;;
+            "gen_keys") echo "Generating Reality keys..." ;;
+            "testing_sni") echo "Testing SNI domain latency..." ;;
+            "testing") echo "Testing..." ;;
+            "test_progress") echo "Test progress" ;;
+            "current") echo "Current" ;;
+            "sni_timeout") echo "All test domains timed out, using default SNI: www.tesla.com" ;;
+            "sni_selected") echo "Selected optimal SNI" ;;
+            "latency") echo "latency" ;;
+            "install_complete") echo "Installation complete!" ;;
+            "uninstalling") echo "Uninstalling..." ;;
+            "uninstall_complete") echo "Uninstall complete" ;;
+            "config_not_found") echo "Configuration not found, please install first" ;;
+            "run_as_root") echo "Please run this script as root" ;;
+            "node_info") echo "VLESS Reality Vision Node Info" ;;
+            "server_addr") echo "Server Address" ;;
+            "port") echo "Port" ;;
+            "share_link") echo "Share Link" ;;
+            "qr_title") echo "Node QR Code (Scan to Import)" ;;
+            "qr_tip") echo "Tip: Run 'bash $0 qr' to regenerate QR code" ;;
+            "common_cmds") echo "Common commands" ;;
+            "view_info") echo "View node info" ;;
+            "show_qr") echo "Show QR code" ;;
+            "service_status") echo "Service Status" ;;
+            "service_restarted") echo "Service restarted" ;;
+            "test_complete") echo "Test complete" ;;
+            "timeout") echo "timeout" ;;
+            "using_sni") echo "Using specified SNI" ;;
+            "installed") echo "Installed" ;;
+            "not_installed") echo "Not Installed" ;;
+            *) echo "$key" ;;
+        esac
+    else
+        case "$key" in
+            "menu_title") echo "VLESS TCP REALITY Vision 管理面板" ;;
+            "menu_install") echo "安装节点" ;;
+            "menu_info") echo "查看节点信息" ;;
+            "menu_qr") echo "显示二维码" ;;
+            "menu_status") echo "服务状态" ;;
+            "menu_restart") echo "重启服务" ;;
+            "menu_test_sni") echo "测试 SNI 延迟" ;;
+            "menu_uninstall") echo "卸载节点" ;;
+            "menu_lang") echo "切换语言" ;;
+            "menu_exit") echo "退出" ;;
+            "menu_choice") echo "请输入选项" ;;
+            "menu_invalid") echo "无效选项，请重新输入" ;;
+            "menu_press_enter") echo "按 Enter 键继续..." ;;
+            "lang_select") echo "Select Language / 选择语言" ;;
+            "lang_zh") echo "中文" ;;
+            "lang_en") echo "English (英文)" ;;
+            "installing") echo "开始安装 VLESS TCP REALITY Vision..." ;;
+            "install_deps") echo "安装依赖..." ;;
+            "install_xray") echo "安装 Xray..." ;;
+            "gen_keys") echo "生成 Reality 密钥..." ;;
+            "testing_sni") echo "测试 SNI 域名延迟..." ;;
+            "testing") echo "测试中..." ;;
+            "test_progress") echo "测试进度" ;;
+            "current") echo "当前" ;;
+            "sni_timeout") echo "所有测试域名均超时，使用默认 SNI: www.tesla.com" ;;
+            "sni_selected") echo "选择最优 SNI" ;;
+            "latency") echo "延迟" ;;
+            "install_complete") echo "安装完成！" ;;
+            "uninstalling") echo "开始卸载..." ;;
+            "uninstall_complete") echo "卸载完成" ;;
+            "config_not_found") echo "未找到配置文件，请先运行安装" ;;
+            "run_as_root") echo "请使用 root 用户运行此脚本" ;;
+            "node_info") echo "VLESS Reality Vision 节点信息" ;;
+            "server_addr") echo "服务器地址" ;;
+            "port") echo "端口" ;;
+            "share_link") echo "分享链接" ;;
+            "qr_title") echo "节点二维码（扫码导入）" ;;
+            "qr_tip") echo "提示: 可运行 'bash $0 qr' 重新生成二维码" ;;
+            "common_cmds") echo "常用命令" ;;
+            "view_info") echo "查看节点信息" ;;
+            "show_qr") echo "显示二维码" ;;
+            "service_status") echo "服务状态" ;;
+            "service_restarted") echo "服务已重启" ;;
+            "test_complete") echo "测试完成" ;;
+            "timeout") echo "超时" ;;
+            "using_sni") echo "使用指定 SNI" ;;
+            "installed") echo "已安装" ;;
+            "not_installed") echo "未安装" ;;
+            *) echo "$key" ;;
+        esac
+    fi
+}
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
@@ -143,14 +260,57 @@ is_port_free() {
     ! ss -lnt | awk '{print $4}' | grep -qE "[:.]$1$"
 }
 
+# 加载语言设置
+load_lang() {
+    if [[ -f "$LANG_FILE" ]]; then
+        CURRENT_LANG=$(cat "$LANG_FILE")
+    fi
+}
+
+# 保存语言设置
+save_lang() {
+    echo "$CURRENT_LANG" > "$LANG_FILE"
+    chmod 600 "$LANG_FILE"
+}
+
+# 语言选择界面
+select_language() {
+    clear
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}           ${YELLOW}Select Language / 选择语言${NC}                        ${CYAN}║${NC}"
+    echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}1.${NC} 中文 (Chinese)                                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}2.${NC} English                                                ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -n "   请选择 / Please choose [1-2]: "
+    read -r lang_choice
+
+    case "$lang_choice" in
+        1)
+            CURRENT_LANG="zh"
+            ;;
+        2)
+            CURRENT_LANG="en"
+            ;;
+        *)
+            CURRENT_LANG="zh"
+            ;;
+    esac
+    save_lang
+}
+
 install_deps() {
-    log_info "安装依赖..."
+    log_info "$(msg install_deps)"
     apt-get update -y >/dev/null 2>&1
     apt-get install -y curl unzip openssl ca-certificates iproute2 qrencode >/dev/null 2>&1
 }
 
 install_xray() {
-    log_info "安装 Xray..."
+    log_info "$(msg install_xray)"
     bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1
 }
 
@@ -172,7 +332,7 @@ choose_port() {
 }
 
 gen_reality_keys() {
-    log_info "生成 Reality 密钥..."
+    log_info "$(msg gen_keys)"
     local KEYS
     KEYS="$("$XRAY_BIN" x25519)"
     PRIVATE_KEY="$(echo "$KEYS" | awk -F'[: ]+' '/PrivateKey|Private key/ {print $2}')"
@@ -195,22 +355,21 @@ test_domain_latency() {
 
 # 动态选择最低延迟的 SNI
 select_best_sni() {
-    log_info "测试 SNI 域名延迟（从 ${#SNI_LIST[@]} 个域名中选择最优）..."
+    log_info "$(msg testing_sni)"
 
     local best_domain=""
     local best_latency=9999
     local tested=0
-    local sample_size=20  # 随机抽样测试数量，加快速度
+    local sample_size=20
 
-    # 随机打乱数组并取前 sample_size 个
     local shuffled_domains
     shuffled_domains=$(printf '%s\n' "${SNI_LIST[@]}" | shuf | head -n "$sample_size")
 
-    echo -e "${CYAN}测试中...${NC}"
+    echo -e "${CYAN}$(msg testing)${NC}"
 
     while IFS= read -r domain; do
         tested=$((tested + 1))
-        printf "\r测试进度: %d/%d - 当前: %s                    " "$tested" "$sample_size" "$domain"
+        printf "\r$(msg test_progress): %d/%d - $(msg current): %s                    " "$tested" "$sample_size" "$domain"
 
         local latency
         latency=$(test_domain_latency "$domain")
@@ -224,10 +383,10 @@ select_best_sni() {
     printf "\n"
 
     if [[ -z "$best_domain" ]]; then
-        log_warn "所有测试域名均超时，使用默认 SNI: www.tesla.com"
+        log_warn "$(msg sni_timeout)"
         SNI="www.tesla.com"
     else
-        log_info "选择最优 SNI: ${best_domain} (延迟: ${best_latency}ms)"
+        log_info "$(msg sni_selected): ${best_domain} ($(msg latency): ${best_latency}ms)"
         SNI="$best_domain"
     fi
 }
@@ -281,12 +440,17 @@ show_qrcode() {
     local link="$1"
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}                    节点二维码（扫码导入）${NC}"
+    echo -e "${GREEN}                    $(msg qr_title)${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
     qrencode -t ANSIUTF8 "$link"
     echo ""
-    echo -e "${YELLOW}提示: 二维码仅显示一次，可运行 'bash $0 qr' 重新生成${NC}"
+    echo -e "${CYAN}───────────────────────────────────────────────────────────────${NC}"
+    echo -e "${GREEN}$(msg share_link):${NC}"
+    echo -e "${YELLOW}$link${NC}"
+    echo -e "${CYAN}───────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo -e "${MAGENTA}$(msg qr_tip)${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 }
 
@@ -297,11 +461,11 @@ show_info() {
 
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}                     VLESS Reality Vision 节点信息${NC}"
+    echo -e "${GREEN}                     $(msg node_info)${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "  ${BLUE}服务器地址:${NC} $SERVER_IP"
-    echo -e "  ${BLUE}端口:${NC}       $PORT"
+    echo -e "  ${BLUE}$(msg server_addr):${NC} $SERVER_IP"
+    echo -e "  ${BLUE}$(msg port):${NC}       $PORT"
     echo -e "  ${BLUE}UUID:${NC}       $UUID"
     echo -e "  ${BLUE}Flow:${NC}       xtls-rprx-vision"
     echo -e "  ${BLUE}SNI:${NC}        $SNI"
@@ -310,26 +474,25 @@ show_info() {
     echo -e "  ${BLUE}Fingerprint:${NC} chrome"
     echo ""
     echo -e "${CYAN}───────────────────────────────────────────────────────────────${NC}"
-    echo -e "${GREEN}分享链接:${NC}"
+    echo -e "${GREEN}$(msg share_link):${NC}"
     echo -e "${YELLOW}$link${NC}"
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 }
 
 cmd_install() {
     if ! is_root; then
-        log_error "请使用 root 用户运行此脚本"
-        exit 1
+        log_error "$(msg run_as_root)"
+        return 1
     fi
 
-    log_info "开始安装 VLESS TCP REALITY Vision..."
+    log_info "$(msg installing)"
 
     install_deps
     install_xray
 
-    # 如果用户指定了 reym，使用用户的选择；否则动态测试
     if [[ -n "${reym:-}" ]]; then
         SNI="$reym"
-        log_info "使用指定 SNI: $SNI"
+        log_info "$(msg using_sni): $SNI"
     else
         select_best_sni
     fi
@@ -347,40 +510,31 @@ cmd_install() {
 
     save_env
 
-    log_info "安装完成！"
+    log_info "$(msg install_complete)"
 
-    # 显示节点信息
     show_info
 
-    # 显示二维码
     local link
     link=$(get_share_link)
     show_qrcode "$link"
-
-    echo ""
-    log_info "常用命令:"
-    echo "  查看节点信息: bash $0 info"
-    echo "  显示二维码:   bash $0 qr"
-    echo "  卸载:         bash $0 uninstall"
 }
 
 cmd_info() {
     if [[ ! -f "$ENV_FILE" ]]; then
-        log_error "未找到配置文件，请先运行 install"
-        exit 1
+        log_error "$(msg config_not_found)"
+        return 1
     fi
     show_info
 }
 
 cmd_qr() {
     if [[ ! -f "$ENV_FILE" ]]; then
-        log_error "未找到配置文件，请先运行 install"
-        exit 1
+        log_error "$(msg config_not_found)"
+        return 1
     fi
 
-    # 确保 qrencode 已安装
     if ! command -v qrencode &>/dev/null; then
-        log_info "安装 qrencode..."
+        log_info "$(msg install_deps)"
         apt-get update -y >/dev/null 2>&1
         apt-get install -y qrencode >/dev/null 2>&1
     fi
@@ -390,77 +544,226 @@ cmd_qr() {
     show_qrcode "$link"
 }
 
+cmd_status() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                     $(msg service_status)${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        echo -e "  Xray: ${GREEN}● Running${NC}"
+    else
+        echo -e "  Xray: ${RED}○ Stopped${NC}"
+    fi
+
+    if [[ -f "$ENV_FILE" ]]; then
+        echo -e "  Config: ${GREEN}$(msg installed)${NC}"
+    else
+        echo -e "  Config: ${YELLOW}$(msg not_installed)${NC}"
+    fi
+
+    echo ""
+    systemctl status xray --no-pager 2>/dev/null | head -10 || true
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+}
+
+cmd_restart() {
+    systemctl restart xray
+    log_info "$(msg service_restarted)"
+}
+
 cmd_uninstall() {
-    log_info "开始卸载..."
+    log_info "$(msg uninstalling)"
     systemctl stop xray 2>/dev/null || true
     systemctl disable xray 2>/dev/null || true
-    rm -f "$XRAY_CONF" "$ENV_FILE"
+    rm -f "$XRAY_CONF" "$ENV_FILE" "$LANG_FILE"
     curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- remove >/dev/null 2>&1
-    log_info "卸载完成"
+    log_info "$(msg uninstall_complete)"
 }
 
 cmd_test_sni() {
-    log_info "测试所有 SNI 域名延迟..."
+    log_info "$(msg testing_sni)"
     echo ""
-
-    declare -A results
 
     for domain in "${SNI_LIST[@]}"; do
         local latency
         latency=$(test_domain_latency "$domain")
         if [[ "$latency" -eq 9999 ]]; then
-            echo -e "${RED}$domain: timeout${NC}"
+            echo -e "${RED}$domain: $(msg timeout)${NC}"
         else
             echo -e "${GREEN}$domain: ${latency}ms${NC}"
-            results["$domain"]=$latency
         fi
     done
 
     echo ""
-    log_info "测试完成"
+    log_info "$(msg test_complete)"
+}
+
+# ============== 主菜单 ==============
+
+show_menu() {
+    clear
+    local status_icon
+    if systemctl is-active --quiet xray 2>/dev/null; then
+        status_icon="${GREEN}●${NC}"
+    else
+        status_icon="${RED}○${NC}"
+    fi
+
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}         ${YELLOW}$(msg menu_title)${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}1.${NC} $(msg menu_install)                                              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}2.${NC} $(msg menu_info)                                          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}3.${NC} $(msg menu_qr)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}4.${NC} $(msg menu_status)  [$status_icon]                                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}5.${NC} $(msg menu_restart)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}6.${NC} $(msg menu_test_sni)                                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${GREEN}7.${NC} $(msg menu_uninstall)                                              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${MAGENTA}8.${NC} $(msg menu_lang)                                            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   ${RED}0.${NC} $(msg menu_exit)                                                ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+main_menu() {
+    while true; do
+        show_menu
+        echo -n "   $(msg menu_choice) [0-8]: "
+        read -r choice
+        echo ""
+
+        case "$choice" in
+            1)
+                cmd_install
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            2)
+                cmd_info
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            3)
+                cmd_qr
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            4)
+                cmd_status
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            5)
+                cmd_restart
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            6)
+                cmd_test_sni
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            7)
+                cmd_uninstall
+                echo ""
+                read -rp "$(msg menu_press_enter)"
+                ;;
+            8)
+                select_language
+                ;;
+            0)
+                echo -e "${GREEN}Bye!${NC}"
+                exit 0
+                ;;
+            *)
+                log_error "$(msg menu_invalid)"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 show_help() {
     echo ""
-    echo -e "${CYAN}VLESS TCP REALITY Vision 脚本${NC}"
+    echo -e "${CYAN}VLESS TCP REALITY Vision${NC}"
     echo ""
-    echo "用法: bash $0 <命令> [参数]"
+    echo "Usage: bash $0 [command]"
     echo ""
-    echo "命令:"
-    echo "  install     安装并配置节点（自动选择最优 SNI）"
-    echo "  info        显示当前节点信息"
-    echo "  qr          显示节点二维码"
-    echo "  uninstall   卸载节点"
-    echo "  test-sni    测试所有 SNI 域名延迟"
+    echo "Commands:"
+    echo "  (none)      Show interactive menu"
+    echo "  install     Install and configure node"
+    echo "  info        Show node information"
+    echo "  qr          Show QR code"
+    echo "  status      Show service status"
+    echo "  restart     Restart service"
+    echo "  uninstall   Uninstall node"
+    echo "  test-sni    Test all SNI latency"
+    echo "  menu        Show interactive menu"
+    echo "  help        Show this help"
     echo ""
-    echo "可选参数（install 时使用）:"
-    echo "  reym=xxx    指定 SNI 域名（不指定则自动选择最优）"
-    echo "  vlpt=xxx    指定端口（不指定则随机）"
-    echo "  uuid=xxx    指定 UUID（不指定则随机生成）"
+    echo "Optional parameters (for install):"
+    echo "  reym=xxx    Specify SNI domain"
+    echo "  vlpt=xxx    Specify port"
+    echo "  uuid=xxx    Specify UUID"
     echo ""
-    echo "示例:"
-    echo "  bash $0 install                           # 自动选择最优 SNI"
-    echo "  reym=www.tesla.com vlpt=443 bash $0 install  # 指定参数安装"
-    echo "  bash $0 qr                                # 显示二维码"
+    echo "Examples:"
+    echo "  bash $0                              # Interactive menu"
+    echo "  bash $0 install                      # Auto-select best SNI"
+    echo "  reym=www.tesla.com bash $0 install   # Specify SNI"
     echo ""
 }
 
-# 主入口
+# ============== 主入口 ==============
+
+# 加载语言设置
+load_lang
+
+# 如果没有语言设置且是交互模式，先选择语言
+init_language_if_needed() {
+    if [[ -z "$CURRENT_LANG" ]]; then
+        select_language
+    fi
+}
+
 case "${1:-}" in
     install)
+        init_language_if_needed
         cmd_install
         ;;
     info)
+        init_language_if_needed
         cmd_info
         ;;
     qr)
+        init_language_if_needed
         cmd_qr
         ;;
+    status)
+        init_language_if_needed
+        cmd_status
+        ;;
+    restart)
+        init_language_if_needed
+        cmd_restart
+        ;;
     uninstall)
+        init_language_if_needed
         cmd_uninstall
         ;;
     test-sni)
+        init_language_if_needed
         cmd_test_sni
+        ;;
+    menu|"")
+        init_language_if_needed
+        main_menu
         ;;
     help|--help|-h)
         show_help
