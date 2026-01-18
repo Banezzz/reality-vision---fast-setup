@@ -34,6 +34,9 @@ PKG_UPDATE=""
 PKG_INSTALL=""
 PKG_CHECK=""
 
+# 服务管理变量 (systemd 或 openrc)
+INIT_SYSTEM=""
+
 PORT_MIN=10000
 PORT_MAX=65535
 
@@ -199,15 +202,106 @@ detect_pkg_manager() {
         PKG_UPDATE="yum check-update || true"
         PKG_INSTALL="yum install -y"
         PKG_CHECK="rpm -q"
+    elif command -v apk &>/dev/null; then
+        PKG_MANAGER="apk"
+        PKG_UPDATE="apk update"
+        PKG_INSTALL="apk add --no-cache"
+        PKG_CHECK="apk info -e"
     else
         echo -e "${RED}[ERROR]${NC} Unsupported package manager"
-        echo "Please use Debian/Ubuntu or CentOS/RHEL/Fedora"
+        echo "Please use Debian/Ubuntu, CentOS/RHEL/Fedora, or Alpine Linux"
         exit 1
     fi
 }
 
-# 初始化包管理器
+# ============== init 系统检测 ==============
+
+detect_init_system() {
+    if command -v systemctl &>/dev/null && systemctl --version &>/dev/null 2>&1; then
+        INIT_SYSTEM="systemd"
+    elif command -v rc-service &>/dev/null; then
+        INIT_SYSTEM="openrc"
+    else
+        # 默认尝试 systemd
+        INIT_SYSTEM="systemd"
+    fi
+}
+
+# ============== 服务管理抽象 ==============
+
+# 启动服务
+service_start() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-service "$svc" start
+    else
+        systemctl start "$svc"
+    fi
+}
+
+# 停止服务
+service_stop() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-service "$svc" stop 2>/dev/null || true
+    else
+        systemctl stop "$svc" 2>/dev/null || true
+    fi
+}
+
+# 重启服务
+service_restart() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-service "$svc" restart
+    else
+        systemctl restart "$svc"
+    fi
+}
+
+# 设置开机启动
+service_enable() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-update add "$svc" default 2>/dev/null || true
+    else
+        systemctl enable "$svc" 2>/dev/null || true
+    fi
+}
+
+# 取消开机启动
+service_disable() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-update del "$svc" default 2>/dev/null || true
+    else
+        systemctl disable "$svc" 2>/dev/null || true
+    fi
+}
+
+# 检查服务是否运行
+service_is_active() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-service "$svc" status &>/dev/null
+    else
+        systemctl is-active --quiet "$svc" 2>/dev/null
+    fi
+}
+
+# 显示服务状态
+service_status() {
+    local svc="$1"
+    if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        rc-service "$svc" status 2>/dev/null || echo "Service $svc is not running"
+    else
+        systemctl status "$svc" --no-pager 2>/dev/null | head -10 || true
+    fi
+}
+
+# 初始化包管理器和 init 系统
 detect_pkg_manager
+detect_init_system
 
 # ============== 多语言支持 ==============
 
@@ -512,13 +606,24 @@ select_language() {
 install_deps() {
     log_info "$(msg install_deps)"
 
-    # 根据包管理器设置包名（iproute2 在 RHEL 系是 iproute）
+    # 根据包管理器设置包名
     local required_packages
-    if [[ "$PKG_MANAGER" == "apt" ]]; then
-        required_packages=(curl unzip openssl ca-certificates iproute2 qrencode)
-    else
-        required_packages=(curl unzip openssl ca-certificates iproute qrencode)
-    fi
+    case "$PKG_MANAGER" in
+        apt)
+            required_packages=(curl unzip openssl ca-certificates iproute2 qrencode)
+            ;;
+        dnf|yum)
+            required_packages=(curl unzip openssl ca-certificates iproute qrencode)
+            ;;
+        apk)
+            # Alpine Linux 特殊包名
+            # libqrencode-tools 提供 qrencode 命令
+            required_packages=(curl unzip openssl ca-certificates iproute2 libqrencode-tools bash coreutils)
+            ;;
+        *)
+            required_packages=(curl unzip openssl ca-certificates iproute qrencode)
+            ;;
+    esac
 
     local missing_packages=()
 
@@ -552,10 +657,104 @@ install_xray() {
     fi
 
     log_info "$(msg install_xray)"
-    if ! bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1; then
-        log_error "Failed to install Xray. Please check your network connection."
+
+    # Alpine Linux 需要手动安装（官方脚本依赖 systemd）
+    if [[ "$PKG_MANAGER" == "apk" ]]; then
+        install_xray_alpine
+    else
+        if ! bash <(curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh) >/dev/null 2>&1; then
+            log_error "Failed to install Xray. Please check your network connection."
+            return 1
+        fi
+    fi
+}
+
+# Alpine Linux 专用 Xray 安装函数
+install_xray_alpine() {
+    local arch
+    arch=$(uname -m)
+    local xray_arch
+
+    # 映射架构名称
+    case "$arch" in
+        x86_64)
+            xray_arch="64"
+            ;;
+        aarch64|arm64)
+            xray_arch="arm64-v8a"
+            ;;
+        armv7l)
+            xray_arch="arm32-v7a"
+            ;;
+        *)
+            log_error "Unsupported architecture: $arch"
+            return 1
+            ;;
+    esac
+
+    # 获取最新版本号
+    local latest_version
+    latest_version=$(curl -sL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+    if [[ -z "$latest_version" ]]; then
+        log_error "Failed to get Xray latest version"
         return 1
     fi
+
+    log_info "Installing Xray $latest_version for Alpine (${xray_arch})..."
+
+    # 下载 Xray
+    local download_url="https://github.com/XTLS/Xray-core/releases/download/${latest_version}/Xray-linux-${xray_arch}.zip"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    if ! curl -sL "$download_url" -o "${tmp_dir}/xray.zip"; then
+        log_error "Failed to download Xray"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # 解压安装
+    unzip -q "${tmp_dir}/xray.zip" -d "${tmp_dir}"
+    mkdir -p /usr/local/bin /usr/local/etc/xray /usr/local/share/xray /var/log/xray
+
+    install -m 755 "${tmp_dir}/xray" /usr/local/bin/xray
+    [[ -f "${tmp_dir}/geoip.dat" ]] && install -m 644 "${tmp_dir}/geoip.dat" /usr/local/share/xray/
+    [[ -f "${tmp_dir}/geosite.dat" ]] && install -m 644 "${tmp_dir}/geosite.dat" /usr/local/share/xray/
+
+    rm -rf "$tmp_dir"
+
+    # 创建 OpenRC 服务脚本
+    create_xray_openrc_service
+
+    log_info "Xray installed successfully on Alpine"
+}
+
+# 创建 Xray OpenRC 服务脚本
+create_xray_openrc_service() {
+    cat > /etc/init.d/xray <<'OPENRC_SERVICE'
+#!/sbin/openrc-run
+
+name="xray"
+description="Xray - A platform for building proxies"
+
+command="/usr/local/bin/xray"
+command_args="run -config /usr/local/etc/xray/config.json"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/xray/access.log"
+error_log="/var/log/xray/error.log"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath --directory --owner root:root --mode 0755 /var/log/xray
+}
+OPENRC_SERVICE
+
+    chmod 755 /etc/init.d/xray
 }
 
 gen_uuid() {
@@ -1220,8 +1419,8 @@ cmd_install() {
     save_env
     write_config
 
-    systemctl enable xray >/dev/null 2>&1
-    systemctl restart xray
+    service_enable xray
+    service_restart xray
 
     log_info "$(msg install_complete)"
 
@@ -1289,7 +1488,7 @@ cmd_status() {
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
 
-    if systemctl is-active --quiet xray 2>/dev/null; then
+    if service_is_active xray; then
         echo -e "  Xray: ${GREEN}● Running${NC}"
     else
         echo -e "  Xray: ${RED}○ Stopped${NC}"
@@ -1315,13 +1514,13 @@ cmd_status() {
     fi
 
     echo ""
-    systemctl status xray --no-pager 2>/dev/null | head -10 || true
+    service_status xray
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 }
 
 cmd_restart() {
-    systemctl restart xray
+    service_restart xray
     log_info "$(msg service_restarted)"
 }
 
@@ -1349,18 +1548,28 @@ cmd_remove() {
 
     # 重新生成 xray 配置
     write_config
-    systemctl restart xray 2>/dev/null || true
+    service_restart xray
 
     log_info "Xray config updated"
 }
 
 cmd_uninstall() {
     log_info "$(msg uninstalling)"
-    systemctl stop xray 2>/dev/null || true
-    systemctl disable xray 2>/dev/null || true
+    service_stop xray
+    service_disable xray
     rm -f "$XRAY_CONF" "$LANG_FILE"
     rm -rf "$NODES_DIR"
-    curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- remove >/dev/null 2>&1
+
+    # Alpine 使用手动安装，需要手动清理
+    if [[ "$PKG_MANAGER" == "apk" ]]; then
+        rm -f /usr/local/bin/xray
+        rm -rf /usr/local/etc/xray
+        rm -rf /usr/local/share/xray
+        rm -rf /var/log/xray
+        rm -f /etc/init.d/xray
+    else
+        curl -Ls https://github.com/XTLS/Xray-install/raw/main/install-release.sh | bash -s -- remove >/dev/null 2>&1
+    fi
     log_info "$(msg uninstall_complete)"
 }
 
@@ -1407,7 +1616,7 @@ cmd_health() {
     local all_ok=true
 
     # 1. 检查 Xray 服务状态
-    if systemctl is-active --quiet xray 2>/dev/null; then
+    if service_is_active xray; then
         echo -e "  ${GREEN}✓${NC} Xray service is running"
     else
         echo -e "  ${RED}✗${NC} Xray service is not running"
@@ -1466,7 +1675,7 @@ cmd_health() {
 show_menu() {
     clear
     local status_icon node_count
-    if systemctl is-active --quiet xray 2>/dev/null; then
+    if service_is_active xray; then
         status_icon="${GREEN}●${NC}"
     else
         status_icon="${RED}○${NC}"
