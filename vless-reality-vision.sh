@@ -365,6 +365,20 @@ msg() {
             "best_latency") echo "Best latency" ;;
             "health_check") echo "Health Check" ;;
             "connections") echo "Active Connections" ;;
+            "sni_selection_title") echo "SNI Domain Selection" ;;
+            "sni_top_results") echo "Top 5 Fastest Domains" ;;
+            "sni_auto_select") echo "Auto select best" ;;
+            "sni_manual_input") echo "Enter custom domain" ;;
+            "sni_choice_prompt") echo "Your choice" ;;
+            "sni_no_results") echo "No test results available" ;;
+            "sni_use_default") echo "Use default" ;;
+            "sni_input_hint") echo "Enter domain (e.g. www.microsoft.com)" ;;
+            "sni_empty_input") echo "Empty input" ;;
+            "sni_custom_set") echo "Custom SNI set" ;;
+            "sni_testing_custom") echo "Testing connectivity" ;;
+            "sni_custom_ok") echo "Domain is reachable" ;;
+            "sni_custom_unreachable") echo "Domain may be unreachable, but will use it anyway" ;;
+            "sni_invalid_format") echo "Invalid domain format" ;;
             *) echo "$key" ;;
         esac
     else
@@ -424,6 +438,20 @@ msg() {
             "best_latency") echo "最低延迟" ;;
             "health_check") echo "健康检查" ;;
             "connections") echo "当前连接数" ;;
+            "sni_selection_title") echo "SNI 域名选择" ;;
+            "sni_top_results") echo "延迟最低的 5 个域名" ;;
+            "sni_auto_select") echo "自动选择最佳" ;;
+            "sni_manual_input") echo "输入自定义域名" ;;
+            "sni_choice_prompt") echo "请选择" ;;
+            "sni_no_results") echo "没有可用的测试结果" ;;
+            "sni_use_default") echo "使用默认" ;;
+            "sni_input_hint") echo "输入域名 (例如 www.microsoft.com)" ;;
+            "sni_empty_input") echo "输入为空" ;;
+            "sni_custom_set") echo "已设置自定义 SNI" ;;
+            "sni_testing_custom") echo "测试连通性" ;;
+            "sni_custom_ok") echo "域名可访问" ;;
+            "sni_custom_unreachable") echo "域名可能无法访问，但仍会使用" ;;
+            "sni_invalid_format") echo "域名格式无效" ;;
             *) echo "$key" ;;
         esac
     fi
@@ -1164,51 +1192,153 @@ select_best_sni() {
     # 检查是否有可用域名
     if [[ ${#latency_map[@]} -eq 0 ]]; then
         log_warn "$(msg sni_timeout)"
-        SNI="www.tesla.com"
+        # 即使测试失败也让用户选择
+        prompt_sni_choice "" ""
         return
     fi
 
-    # 找出所有具有最低延迟的域名
-    local best_domains=()
-    for domain in "${!latency_map[@]}"; do
-        if [[ "${latency_map[$domain]}" -eq "$best_latency" ]]; then
-            best_domains+=("$domain")
-        fi
-    done
+    # 获取排序后的 Top 5 域名
+    local top_domains=()
+    local top_latencies=()
+    while IFS=' ' read -r lat dom; do
+        top_domains+=("$dom")
+        top_latencies+=("$lat")
+    done < <(for domain in "${!latency_map[@]}"; do
+        echo "${latency_map[$domain]} $domain"
+    done | sort -n | head -5)
 
-    # 如果只有一个最优域名，直接使用
-    if [[ ${#best_domains[@]} -eq 1 ]]; then
-        SNI="${best_domains[0]}"
-        log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${best_latency}ms)"
-        return
+    # 让用户选择 SNI
+    prompt_sni_choice top_domains top_latencies
+}
+
+# 让用户选择 SNI 的交互函数
+# 参数1: top_domains 数组名称
+# 参数2: top_latencies 数组名称
+prompt_sni_choice() {
+    local -n _top_domains=$1 2>/dev/null || true
+    local -n _top_latencies=$2 2>/dev/null || true
+    local has_results=false
+
+    if [[ ${#_top_domains[@]} -gt 0 ]] 2>/dev/null; then
+        has_results=true
     fi
 
-    # 如果有多个相同延迟的域名，让用户选择
     {
-    echo -e "${YELLOW}$(msg sni_multiple) ($(msg best_latency): ${best_latency}ms)${NC}"
-    echo -e "${CYAN}$(msg sni_choose):${NC}"
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}                     $(msg sni_selection_title)${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
 
-    local i=1
-    for domain in "${best_domains[@]}"; do
-        echo -e "  ${GREEN}$i.${NC} $domain"
-        ((i++))
-    done
-
-    echo ""
-    echo -n "  $(msg menu_choice) [1-${#best_domains[@]}]: "
+    if $has_results; then
+        echo -e "  ${BLUE}$(msg sni_top_results):${NC}"
+        echo ""
+        local i=1
+        for idx in "${!_top_domains[@]}"; do
+            printf "    ${GREEN}%d.${NC} %-40s ${YELLOW}%dms${NC}\n" "$i" "${_top_domains[$idx]}" "${_top_latencies[$idx]}"
+            ((i++))
+        done
+        echo ""
+        echo -e "${CYAN}───────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${GREEN}A.${NC} $(msg sni_auto_select) (${_top_domains[0]})"
+        echo -e "  ${GREEN}M.${NC} $(msg sni_manual_input)"
+        echo ""
+        echo -n "  $(msg sni_choice_prompt) [A/1-5/M]: "
+    else
+        echo -e "  ${YELLOW}$(msg sni_no_results)${NC}"
+        echo ""
+        echo -e "  ${GREEN}D.${NC} $(msg sni_use_default) (www.tesla.com)"
+        echo -e "  ${GREEN}M.${NC} $(msg sni_manual_input)"
+        echo ""
+        echo -n "  $(msg sni_choice_prompt) [D/M]: "
+    fi
     } >/dev/tty
+
     read -r choice </dev/tty
 
-    # 验证输入
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#best_domains[@]} ]]; then
-        SNI="${best_domains[$((choice - 1))]}"
-    else
-        # 默认选择第一个
-        SNI="${best_domains[0]}"
-    fi
+    # 处理用户选择
+    choice=$(echo "$choice" | tr '[:lower:]' '[:upper:]')
 
-    log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${best_latency}ms)"
+    if $has_results; then
+        case "$choice" in
+            A|"")
+                # 自动选择最佳
+                SNI="${_top_domains[0]}"
+                log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${_top_latencies[0]}ms)"
+                ;;
+            1|2|3|4|5)
+                # 从 Top 5 中选择
+                local idx=$((choice - 1))
+                if [[ $idx -lt ${#_top_domains[@]} ]]; then
+                    SNI="${_top_domains[$idx]}"
+                    log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${_top_latencies[$idx]}ms)"
+                else
+                    SNI="${_top_domains[0]}"
+                    log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${_top_latencies[0]}ms)"
+                fi
+                ;;
+            M)
+                # 手动输入
+                prompt_custom_sni
+                ;;
+            *)
+                # 默认自动选择
+                SNI="${_top_domains[0]}"
+                log_info "$(msg sni_selected): ${SNI} ($(msg latency): ${_top_latencies[0]}ms)"
+                ;;
+        esac
+    else
+        case "$choice" in
+            D|"")
+                SNI="www.tesla.com"
+                log_info "$(msg sni_use_default): ${SNI}"
+                ;;
+            M)
+                prompt_custom_sni
+                ;;
+            *)
+                SNI="www.tesla.com"
+                log_info "$(msg sni_use_default): ${SNI}"
+                ;;
+        esac
+    fi
+}
+
+# 提示用户输入自定义 SNI
+prompt_custom_sni() {
+    {
+    echo ""
+    echo -e "  ${CYAN}$(msg sni_input_hint)${NC}"
+    echo -n "  SNI: "
+    } >/dev/tty
+
+    read -r custom_sni </dev/tty
+
+    # 清理输入（移除空格和协议前缀）
+    custom_sni=$(echo "$custom_sni" | sed 's/^https\?:\/\///' | sed 's/\/.*$//' | tr -d '[:space:]')
+
+    if [[ -z "$custom_sni" ]]; then
+        SNI="www.tesla.com"
+        log_warn "$(msg sni_empty_input), $(msg sni_use_default): ${SNI}"
+    else
+        # 验证域名格式
+        if [[ "$custom_sni" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$ ]]; then
+            SNI="$custom_sni"
+            log_info "$(msg sni_custom_set): ${SNI}"
+
+            # 可选：测试自定义域名连通性
+            echo -e "  ${CYAN}$(msg sni_testing_custom)...${NC}" >/dev/tty
+            if timeout 3 openssl s_client -connect "${SNI}:443" -servername "$SNI" </dev/null &>/dev/null; then
+                log_info "$(msg sni_custom_ok)"
+            else
+                log_warn "$(msg sni_custom_unreachable)"
+            fi
+        else
+            log_warn "$(msg sni_invalid_format), $(msg sni_use_default)"
+            SNI="www.tesla.com"
+        fi
+    fi
 }
 
 write_config() {
